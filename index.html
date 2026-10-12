@@ -536,6 +536,11 @@ function renderDisplay(s){
       <p class="muted">Czekam na prowadzącego… Kod sali: <b>${esc(roomName)}</b></p></div>`;
     return;
   }
+  if(s.mode==='intro'){
+    body.innerHTML = `<div class="idle"><div class="logo">FAMILIADA<small>JOHNSON &amp; JOHNSON</small></div>
+      <p class="muted" style="font-size:clamp(16px,3vw,26px); letter-spacing:3px">Zapraszamy do gry!</p></div>`;
+    return;
+  }
   if(s.mode==='gameover'){
     const names=s.teamNames||["D1","D2"];
     const w = s.winner;
@@ -658,17 +663,18 @@ function renderControl(){
   if(game.mode==='idle'){
     body.innerHTML = `<div class="card"><h3>Start</h3>
       <p class="muted" style="margin-bottom:12px">Wgrane ${config.questions.length} pytań w ${roundsCount()} rundach oraz ${config.finaleQuestions.length} pytań finałowych.</p>
-      <button class="btn gold big" style="width:100%" id="go-start">▶ Rozpocznij grę</button>
+      <button class="btn gold big" style="width:100%" id="go-start">▶ Pokaż ekran tytułowy</button>
       <div class="row" style="margin-top:10px">
         <button class="btn" id="go-finale" style="flex:1">🏁 Przejdź do finału</button>
         <button class="btn ghost" id="go-edit" style="flex:1">✎ Edytuj pytania</button>
       </div></div>`;
-    document.getElementById('go-start').onclick=()=>{ game.mode='question'; game.qIndex=0; pushFx(null); broadcast(); renderControl(); };
+    document.getElementById('go-start').onclick=()=>{ game.mode='intro'; pushFx(null); broadcast(); renderControl(); };
     document.getElementById('go-finale').onclick=()=>{ game.mode='finale'; game.finaleIndex=0; broadcast(); renderControl(); };
     document.getElementById('go-edit').onclick=openEditor;
     broadcast();
     return;
   }
+  if(game.mode==='intro'){ renderControlIntro(); return; }
   if(game.mode==='gameover'){ renderControlGameover(); return; }
   if(game.mode==='finale'){ renderControlFinale(); return; }
   renderControlQuestion();
@@ -814,6 +820,17 @@ function renderControlFinale(){
   document.getElementById('fin-end').onclick=()=>{ game.mode='gameover'; pushFx('win'); broadcast(); renderControl(); };
 }
 
+function renderControlIntro(){
+  const body=document.getElementById('c-body');
+  body.innerHTML=`<div class="card" style="text-align:center">
+    <h3>Ekran tytułowy</h3>
+    <p class="muted" style="margin-bottom:6px">Na rzutniku widać planszę „FAMILIADA". Możesz puścić jingiel (🎵 u góry). Gdy będziesz gotowy — zacznij grę.</p>
+    <button class="btn gold big" style="width:100%; margin-top:6px" id="go-q1">▶ Zacznij od 1. pytania</button>
+    <button class="btn ghost" style="width:100%; margin-top:8px" id="go-idle">◀ Wróć</button>
+  </div>`;
+  document.getElementById('go-q1').onclick=()=>{ game.mode='question'; game.qIndex=0; game.progress={}; pushFx(null); broadcast(); renderControl(); };
+  document.getElementById('go-idle').onclick=()=>{ game.mode='idle'; broadcast(); renderControl(); };
+}
 function renderControlGameover(){
   const body=document.getElementById('c-body');
   const w = game.scores[0]===game.scores[1]?-1:(game.scores[0]>game.scores[1]?0:1);
