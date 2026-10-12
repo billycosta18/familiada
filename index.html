@@ -233,7 +233,7 @@ textarea.io{width:100%; min-height:120px; font-family:ui-monospace,monospace; fo
       </button>
     </div>
     <p style="margin-top:18px; font-size:13px">Grasz na jednym urządzeniu? Wybierz <b>Panel prowadzącego</b> – ma podgląd planszy.</p>
-    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 8 · dźwięki poprawione</div>
+    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 9 · przycisk jingla rundy</div>
   </div>
 </div>
 
@@ -640,7 +640,7 @@ function updateMicUI(){ const m=document.querySelector('.fin-mic'); if(m){ m.cla
 function handleCmd(d){
   if(!d) return;
   if(d.type==='mic'){ d.on?startMic():stopMic(); }
-  else if(d.type==='jingle'){ if(d.on){ stopSound('start'); playSound('start'); } else stopSound('start'); }
+  else if(d.type==='jingle'){ if(d.on){ stopSound('start'); playSound('start'); } else stopSound('start'); }  else if(d.type==='roundjingle'){ playSound('round'); }
 }
 
 /* ============================================================
@@ -728,6 +728,7 @@ function renderControlQuestion(){
         <button class="btn ghost" id="reset-q">Wyczyść pytanie</button>
         <button class="btn" id="next-q">Nast. ▶</button>
       </div>
+      <button class="btn gold" id="round-jingle" style="width:100%; margin-top:8px">🎶 Jingiel nowej rundy</button>
       <div class="row" style="margin-top:8px">
         <button class="btn" id="to-finale" style="flex:1">🏁 Finał</button>
         <button class="btn ghost" id="to-end" style="flex:1">🏆 Zakończ grę</button>
@@ -756,6 +757,7 @@ function renderControlQuestion(){
   document.getElementById('next-q').onclick=()=>{ if(game.qIndex<config.questions.length-1){ const oldR=config.questions[game.qIndex].round; game.qIndex++; pushFx(config.questions[game.qIndex].round!==oldR?'round':null); broadcast(); renderControlQuestion(); } };
   document.getElementById('reset-q').onclick=()=>{ game.progress[game.qIndex]={revealed:q.answers.map(()=>false),strikes:0,shown:false}; pushFx(null); broadcast(); renderControlQuestion(); };
   document.getElementById('jump').onchange=(e)=>{ const oldR=config.questions[game.qIndex].round; game.qIndex=+e.target.value; pushFx(config.questions[game.qIndex].round!==oldR?'round':null); broadcast(); renderControlQuestion(); };
+  document.getElementById('round-jingle').onclick=()=>{ if(room&&roomReady) room.emit('cmd',{type:'roundjingle'}); };
   document.getElementById('to-finale').onclick=()=>{ game.mode='finale'; game.finaleIndex=0; broadcast(); renderControl(); };
   document.getElementById('to-end').onclick=()=>{ game.mode='gameover'; pushFx('win'); broadcast(); renderControl(); };
 }
