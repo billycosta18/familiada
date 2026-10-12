@@ -233,7 +233,7 @@ textarea.io{width:100%; min-height:120px; font-family:ui-monospace,monospace; fo
       </button>
     </div>
     <p style="margin-top:18px; font-size:13px">Grasz na jednym urządzeniu? Wybierz <b>Panel prowadzącego</b> – ma podgląd planszy.</p>
-    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 9 · przycisk jingla rundy</div>
+    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 10 · nowy finał</div>
   </div>
 </div>
 
@@ -357,6 +357,7 @@ function freshGame(){
     finaleIndex:0,
     finaleProgress:{},      // idx -> {revealed:[bool], awarded:[pts]}
     finaleTotal:0,
+    finaleSlots:[],
     fx:{id:0, kind:null},
   };
 }
@@ -438,6 +439,12 @@ function setConn(on, dead){
 /* ============================================================
    BROADCAST (control → display)
    ============================================================ */
+function ensureFinaleSlots(){
+  const n = (config.finaleQuestions && config.finaleQuestions.length) ? config.finaleQuestions.length : 5;
+  if(!game.finaleSlots || game.finaleSlots.length!==n){
+    game.finaleSlots = Array.from({length:n},()=>({answer:'',points:0,shown:false,revealed:false}));
+  }
+}
 function buildStatePacket(){
   const q = config.questions[game.qIndex];
   const p = curProgress();
@@ -463,17 +470,11 @@ function buildStatePacket(){
     packet.qShown = !!p.shown;
   }
   if(game.mode==='finale'){
-    const fq = config.finaleQuestions[game.finaleIndex];
-    const fp = curFinProgress();
+    ensureFinaleSlots();
+    const total = game.finaleSlots.reduce((sum,sl)=> sum + (sl.revealed ? (+sl.points||0) : 0), 0);
     packet.finaleTarget = config.finaleTarget;
-    packet.finaleTotal = game.finaleTotal;
-    packet.finaleIndex = game.finaleIndex;
-    packet.finaleCount = config.finaleQuestions.length;
-    packet.listening = micListening;
-    if(fq){
-      packet.finText = fq.text;
-      packet.finAnswers = fq.answers.map((a,i)=>({text:a.text, points:a.points, revealed:fp.revealed[i]}));
-    }
+    packet.finaleTotal = total;
+    packet.finSlots = game.finaleSlots.map(sl=>({ answer: sl.shown ? sl.answer : '', shown: !!sl.shown, points: (+sl.points||0), revealed: !!sl.revealed }));
   }
   if(game.mode==='gameover'){
     packet.winner = game.scores[0]===game.scores[1] ? -1 : (game.scores[0]>game.scores[1]?0:1);
@@ -581,17 +582,21 @@ function answerHtml(a,i){
 }
 function renderFinaleDisplay(s){
   const body=document.getElementById('d-body');
-  const reached = s.finaleTotal>= (s.finaleTarget||0);
+  const slots = s.finSlots||[];
+  const rows = slots.map((sl,i)=>`<div style="display:flex; align-items:center; gap:10px; background:linear-gradient(180deg,var(--slot),#071f52); border:1px solid var(--slot-edge); border-radius:12px; min-height:clamp(40px,7vh,66px); overflow:hidden">
+      <div style="width:clamp(40px,6vw,64px); align-self:stretch; display:flex; align-items:center; justify-content:center; background:var(--gold); color:#061640; font-family:var(--disp); font-size:clamp(20px,3.6vw,34px)">${i+1}</div>
+      <div style="flex:1; min-width:0; font-family:var(--disp); text-transform:uppercase; letter-spacing:1px; font-size:clamp(16px,3vw,30px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 6px">${sl.shown?esc(sl.answer||' '):'&nbsp;'}</div>
+      <div style="width:clamp(62px,10vw,112px); align-self:stretch; display:flex; align-items:center; justify-content:center; background:${sl.revealed?'#071a49':'var(--panel)'}; border-left:1px solid var(--slot-edge); font-family:var(--disp); font-size:clamp(20px,4vw,40px); color:var(--gold)">${sl.revealed?sl.points:'▨'}</div>
+    </div>`).join('');
   body.innerHTML = `
-    <div class="roundtag" style="padding-top:14px">FINAŁ · pytanie ${(s.finaleIndex||0)+1}/${s.finaleCount||'?'} · cel: ${s.finaleTarget}</div>
-    <div class="fin-wrap">
-      <div class="fin-q">${esc(s.finText||'')}</div>
-      <div class="fin-mic ${micListening?'on':''}"><span class="live"></span>${micListening?'Słucham…':'Mikrofon wyłączony'}</div>
-      <div class="transcript" id="d-transcript"></div>
-      <div class="fin-answers">${(s.finAnswers||[]).map(a=>`<span class="fa ${a.revealed?'hit':''}">${esc(a.text)}<span class="p">${a.revealed?('+'+a.points):''}</span></span>`).join('')}</div>
-      <div class="fin-total" style="${reached?'color:var(--green);text-shadow:0 4px 0 var(--green-deep)':''}">${s.finaleTotal}<small>punktów z ${s.finaleTarget}</small></div>
+    <div class="roundtag" style="padding-top:18px; font-size:clamp(16px,3vw,26px)">FINAŁ</div>
+    <div class="board" style="max-width:860px; justify-content:center; gap:clamp(6px,1.4vh,12px)">
+      ${rows}
+      <div style="display:flex; align-items:center; gap:10px; margin-top:8px">
+        <div style="flex:1; text-align:right; font-family:var(--disp); letter-spacing:4px; color:var(--muted); font-size:clamp(18px,3.6vw,34px); padding-right:8px">SUMA</div>
+        <div style="width:clamp(62px,10vw,112px); text-align:center; background:var(--gold); color:#061640; font-family:var(--disp); font-size:clamp(22px,4.4vw,44px); border-radius:8px; padding:6px 0">${s.finaleTotal||0}</div>
+      </div>
     </div>`;
-  const t=document.getElementById('d-transcript'); if(t) t.textContent = lastTranscript;
 }
 
 /* ---- confetti ---- */
@@ -763,64 +768,51 @@ function renderControlQuestion(){
 }
 
 function renderControlFinale(){
+  ensureFinaleSlots();
   const body=document.getElementById('c-body');
-  const fq=config.finaleQuestions[game.finaleIndex]; const fp=curFinProgress();
-  const reached = game.finaleTotal>=config.finaleTarget;
-  body.innerHTML = `
-    <div class="card">
-      <h3>Finał · ${game.finaleIndex+1}/${config.finaleQuestions.length}</h3>
-      <div class="ctl-q">${fq?esc(fq.text):'(brak pytania)'}</div>
-      <div class="ctl-meta">Suma: <b style="color:var(--gold)">${game.finaleTotal}</b> / ${config.finaleTarget} ${reached?'✅ cel osiągnięty':''}</div>
-    </div>
-    <div class="card">
-      <h3>Mikrofon na ekranie</h3>
-      <div class="tbox" id="c-transcript">${esc(lastTranscriptCtl)||'—'}</div>
-      <div class="row" style="margin-top:8px">
-        <button class="btn" id="mic-on" style="flex:1">🎤 Start nasłuchu</button>
-        <button class="btn ghost" id="mic-off" style="flex:1">⏹ Stop</button>
+  const total = game.finaleSlots.reduce((sum,sl)=> sum + (sl.revealed ? (+sl.points||0) : 0), 0);
+  let html = `<div class="card"><h3>Finał</h3>
+    <div class="ctl-meta">Wpisz odpowiedź uczestnika i punkty, potem odkryj. SUMA: <b style="color:var(--gold)">${total}</b>${config.finaleTarget?(' / '+config.finaleTarget):''}</div></div>`;
+  game.finaleSlots.forEach((sl,i)=>{
+    const q = config.finaleQuestions[i];
+    const hint = q ? q.answers.map(a=>esc(a.text)+' '+a.points).join(' · ') : '';
+    html += `<div class="card">
+      <div class="ctl-meta" style="margin-bottom:6px"><b>${i+1}.</b> ${q?esc(q.text):('Odpowiedź '+(i+1))}</div>
+      ${hint?`<div class="muted" style="font-size:12px; margin-bottom:8px">Sugestie: ${hint}</div>`:''}
+      <input id="fa-${i}" placeholder="odpowiedź uczestnika" value="${escAttr(sl.answer||'')}" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--slot-edge); background:var(--slot); color:var(--fg); margin-bottom:8px">
+      <div class="row" style="align-items:center">
+        <input id="fp-${i}" type="number" placeholder="pkt" value="${sl.points?sl.points:''}" style="width:76px; padding:10px; border-radius:8px; border:1px solid var(--slot-edge); background:var(--slot); color:var(--fg)">
+        <button class="btn" data-save="${i}" style="flex:1">💾 Pokaż odpowiedź</button>
+        <button class="btn ${sl.revealed?'ghost':'gold'}" data-reveal="${i}" style="flex:1">${sl.revealed?'✓ Punkty':'👁 Odkryj punkty'}</button>
       </div>
-      <p class="muted" style="margin-top:6px">Najlepiej włączyć mikrofon przyciskiem na ekranie (rzutniku). Tu masz podgląd tego, co słyszy.</p>
-    </div>
-    <div class="card">
-      <h3>Oceń odpowiedź</h3>
-      <p class="muted" style="margin-bottom:8px">Kliknij pasującą odpowiedź (dodaje punkty + odkrywa na ekranie), albo oznacz jako złą.</p>
-      <div class="ans-list">
-        ${fq?fq.answers.map((a,i)=>`<button class="ans-item ${fp.revealed[i]?'rev':''}" data-fi="${i}">
-          <span class="n">${i+1}</span><span class="t">${esc(a.text)}</span><span class="p">+${a.points}</span></button>`).join(''):''}
-      </div>
-      <div class="row" style="margin-top:10px">
-        <button class="btn red" id="fin-bad" style="flex:1">✖ Zła odpowiedź</button>
-      </div>
-      <div class="row" style="margin-top:8px; align-items:center">
-        <input id="fin-manual" type="number" placeholder="punkty" style="width:90px; padding:10px; border-radius:8px; border:1px solid var(--slot-edge); background:var(--slot); color:var(--fg)">
-        <button class="btn" id="fin-add" style="flex:1">➕ Dodaj ręcznie</button>
-      </div>
-    </div>
-    <div class="card">
-      <h3>Nawigacja finału</h3>
-      <div class="grid3">
-        <button class="btn" id="fin-prev">◀ Poprz.</button>
-        <button class="btn ghost" id="fin-reset">Wyczyść</button>
-        <button class="btn" id="fin-next">Nast. ▶</button>
-      </div>
-      <div class="row" style="margin-top:8px">
-        <button class="btn ghost" id="fin-back" style="flex:1">↩ Wróć do rund</button>
-        <button class="btn gold" id="fin-end" style="flex:1">🏆 Zakończ</button>
-      </div>
+      <div class="muted" style="font-size:12px; margin-top:4px">${sl.shown?('Na planszy: '+esc(sl.answer||'(puste)')):'Jeszcze nie na planszy'}${sl.revealed?(' · '+(+sl.points||0)+' pkt'):''}</div>
     </div>`;
-
-  if(lastTranscriptCtl) document.getElementById('c-transcript').textContent=lastTranscriptCtl;
-  document.getElementById('mic-on').onclick=()=>{ if(room&&roomReady) room.emit("cmd",{type:'mic',on:true}).catch(()=>{}); };
-  document.getElementById('mic-off').onclick=()=>{ if(room&&roomReady) room.emit("cmd",{type:'mic',on:false}).catch(()=>{}); };
-  body.querySelectorAll('[data-fi]').forEach(b=> b.onclick=()=>{
-    const i=+b.dataset.fi; if(!fp.revealed[i]){ fp.revealed[i]=true; game.finaleTotal+=fq.answers[i].points; pushFx('ding'); }
+  });
+  html += `<div class="card">
+    <button class="btn red" id="fin-clear" style="width:100%">🧹 Wyczyść finał</button>
+    <div class="row" style="margin-top:8px">
+      <button class="btn ghost" id="fin-back" style="flex:1">↩ Wróć do rund</button>
+      <button class="btn gold" id="fin-end" style="flex:1">🏆 Zakończ grę</button>
+    </div></div>`;
+  body.innerHTML = html;
+  game.finaleSlots.forEach((sl,i)=>{
+    const fa=document.getElementById('fa-'+i); const fp=document.getElementById('fp-'+i);
+    if(fa) fa.oninput=e=>{ sl.answer=e.target.value; };
+    if(fp) fp.oninput=e=>{ sl.points=+e.target.value||0; };
+  });
+  body.querySelectorAll('[data-save]').forEach(b=> b.onclick=()=>{
+    const i=+b.dataset.save; const sl=game.finaleSlots[i];
+    const fa=document.getElementById('fa-'+i); const fp=document.getElementById('fp-'+i);
+    sl.answer=fa.value; sl.points=+fp.value||0; sl.shown=true;
     broadcast(); renderControlFinale();
   });
-  document.getElementById('fin-bad').onclick=()=>{ pushFx('strike'); broadcast(); };
-  document.getElementById('fin-add').onclick=()=>{ const v=+document.getElementById('fin-manual').value; if(v){ game.finaleTotal+=v; pushFx('ding'); broadcast(); renderControlFinale(); } };
-  document.getElementById('fin-prev').onclick=()=>{ if(game.finaleIndex>0){ game.finaleIndex--; broadcast(); renderControlFinale(); } };
-  document.getElementById('fin-next').onclick=()=>{ if(game.finaleIndex<config.finaleQuestions.length-1){ game.finaleIndex++; broadcast(); renderControlFinale(); } };
-  document.getElementById('fin-reset').onclick=()=>{ game.finaleProgress[game.finaleIndex]={revealed:fq.answers.map(()=>false)}; broadcast(); renderControlFinale(); };
+  body.querySelectorAll('[data-reveal]').forEach(b=> b.onclick=()=>{
+    const i=+b.dataset.reveal; const sl=game.finaleSlots[i];
+    const fa=document.getElementById('fa-'+i); const fp=document.getElementById('fp-'+i);
+    sl.answer=fa.value; sl.points=+fp.value||0; sl.shown=true; sl.revealed=true;
+    pushFx('good'); broadcast(); renderControlFinale();
+  });
+  document.getElementById('fin-clear').onclick=()=>{ game.finaleSlots=null; ensureFinaleSlots(); broadcast(); renderControlFinale(); };
   document.getElementById('fin-back').onclick=()=>{ game.mode='question'; broadcast(); renderControl(); };
   document.getElementById('fin-end').onclick=()=>{ game.mode='gameover'; pushFx('win'); broadcast(); renderControl(); };
 }
