@@ -233,7 +233,7 @@ textarea.io{width:100%; min-height:120px; font-family:ui-monospace,monospace; fo
       </button>
     </div>
     <p style="margin-top:18px; font-size:13px">Grasz na jednym urządzeniu? Wybierz <b>Panel prowadzącego</b> – ma podgląd planszy.</p>
-    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 10 · nowy finał</div>
+    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 11 · finał tabela</div>
   </div>
 </div>
 
@@ -583,18 +583,28 @@ function answerHtml(a,i){
 function renderFinaleDisplay(s){
   const body=document.getElementById('d-body');
   const slots = s.finSlots||[];
-  const rows = slots.map((sl,i)=>`<div style="display:flex; align-items:center; gap:10px; background:linear-gradient(180deg,var(--slot),#071f52); border:1px solid var(--slot-edge); border-radius:12px; min-height:clamp(40px,7vh,66px); overflow:hidden">
-      <div style="width:clamp(40px,6vw,64px); align-self:stretch; display:flex; align-items:center; justify-content:center; background:var(--gold); color:#061640; font-family:var(--disp); font-size:clamp(20px,3.6vw,34px)">${i+1}</div>
-      <div style="flex:1; min-width:0; font-family:var(--disp); text-transform:uppercase; letter-spacing:1px; font-size:clamp(16px,3vw,30px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 6px">${sl.shown?esc(sl.answer||' '):'&nbsp;'}</div>
-      <div style="width:clamp(62px,10vw,112px); align-self:stretch; display:flex; align-items:center; justify-content:center; background:${sl.revealed?'#071a49':'var(--panel)'}; border-left:1px solid var(--slot-edge); font-family:var(--disp); font-size:clamp(20px,4vw,40px); color:var(--gold)">${sl.revealed?sl.points:'▨'}</div>
-    </div>`).join('');
+  const rowsHtml = slots.map((sl,i)=>{
+    const grey = !sl.shown;
+    return `<tr style="opacity:${grey?0.3:1}; transition:opacity .25s">
+      <td style="width:52px; text-align:center; background:var(--gold); color:#061640; font-family:var(--disp); font-size:clamp(20px,3.4vw,32px); padding:12px 0; border-radius:10px 0 0 10px">${i+1}</td>
+      <td style="background:var(--slot); border-top:1px solid var(--slot-edge); border-bottom:1px solid var(--slot-edge); padding:12px 16px; font-family:var(--disp); text-transform:uppercase; letter-spacing:1px; font-size:clamp(16px,3vw,30px); color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${sl.shown?esc(sl.answer||' '):'— — —'}</td>
+      <td style="width:clamp(66px,11vw,120px); text-align:center; background:${sl.revealed?'#071a49':'var(--panel)'}; border:1px solid var(--slot-edge); border-radius:0 10px 10px 0; font-family:var(--disp); font-size:clamp(20px,3.8vw,38px); color:var(--gold); padding:12px 0">${sl.revealed?sl.points:'▨'}</td>
+    </tr>`;
+  }).join('');
   body.innerHTML = `
-    <div class="roundtag" style="padding-top:18px; font-size:clamp(16px,3vw,26px)">FINAŁ</div>
-    <div class="board" style="max-width:860px; justify-content:center; gap:clamp(6px,1.4vh,12px)">
-      ${rows}
-      <div style="display:flex; align-items:center; gap:10px; margin-top:8px">
-        <div style="flex:1; text-align:right; font-family:var(--disp); letter-spacing:4px; color:var(--muted); font-size:clamp(18px,3.6vw,34px); padding-right:8px">SUMA</div>
-        <div style="width:clamp(62px,10vw,112px); text-align:center; background:var(--gold); color:#061640; font-family:var(--disp); font-size:clamp(22px,4.4vw,44px); border-radius:8px; padding:6px 0">${s.finaleTotal||0}</div>
+    <div class="roundtag" style="padding-top:18px; font-size:clamp(18px,3.4vw,28px)">FINAŁ</div>
+    <div style="flex:1; display:flex; align-items:center; justify-content:center; padding:10px clamp(12px,4vw,40px) 24px">
+      <div style="width:100%; max-width:860px; overflow-x:auto">
+        <table style="width:100%; border-collapse:separate; border-spacing:0 10px; table-layout:fixed">
+          <colgroup><col style="width:52px"><col><col style="width:clamp(66px,11vw,120px)"></colgroup>
+          <tbody>
+            ${rowsHtml}
+            <tr>
+              <td colspan="2" style="text-align:right; padding:10px 16px; font-family:var(--disp); letter-spacing:4px; color:var(--muted); font-size:clamp(18px,3.4vw,32px)">SUMA</td>
+              <td style="text-align:center; background:var(--gold); color:#061640; font-family:var(--disp); font-size:clamp(22px,4.2vw,42px); border-radius:10px; padding:12px 0">${s.finaleTotal||0}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>`;
 }
