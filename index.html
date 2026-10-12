@@ -411,7 +411,7 @@ function connectRoom(){
   mq.on('connect', function(){
     mqReady=true; roomReady=true; setConn(true,false);
     var b=topicBase();
-    if(role==='control'){ mq.subscribe(b+'transcript'); broadcast(); }
+    if(role==='control'){ mq.subscribe(b+'transcript'); mq.publish(b+'state','',{retain:true}); broadcast(); }
     else { mq.subscribe(b+'state'); mq.subscribe(b+'cmd'); }
   });
   mq.on('reconnect', function(){ setConn(false,false); });
@@ -532,8 +532,8 @@ function flashBigX(){ const el=document.getElementById('bigx'); el.classList.rem
 function renderDisplay(s){
   const body = document.getElementById('d-body');
   if(!s || s.mode==='idle'){
-    body.innerHTML = `<div class="idle"><div class="logo">FAMILIADA</div>
-      <p class="muted">Czekam na prowadzącego… Kod sali: <b>${esc(roomName)}</b></p></div>`;
+    body.innerHTML = `<div class="idle"><div class="logo">FAMILIADA<small>JOHNSON &amp; JOHNSON</small></div>
+      <p class="muted">Kod sali: <b>${esc(roomName)}</b></p></div>`;
     return;
   }
   if(s.mode==='intro'){
