@@ -233,7 +233,7 @@ textarea.io{width:100%; min-height:120px; font-family:ui-monospace,monospace; fo
       </button>
     </div>
     <p style="margin-top:18px; font-size:13px">Grasz na jednym urządzeniu? Wybierz <b>Panel prowadzącego</b> – ma podgląd planszy.</p>
-    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 11 · finał tabela</div>
+    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 14 · punkty z odpowiedzi</div>
   </div>
 </div>
 
@@ -281,8 +281,9 @@ initSounds();
    DANE DOMYŚLNE – pytania z prezentacji PowerPoint
    ============================================================ */
 const CONFIG_SEED = {
-  teamNames: ["DRUŻYNA 1", "DRUŻYNA 2"],
+  teamNames: ["DRUŻYNA 1", "DRUŻYNA 2", "DRUŻYNA 3", "DRUŻYNA 4"],
   maxStrikes: 3,
+  winPoints: 2,
   finaleTarget: 200,
   questions: [
     { round:"Runda 1", multiplier:1, text:"Jakie mamy rodzaje igieł?", answers:[
@@ -326,8 +327,11 @@ function normalizeConfig(raw){
   c.questions = (c.questions||[]).map(fix);
   c.finaleQuestions = (c.finaleQuestions||[]).map(q=>({ text:q.text||"",
     answers:(q.answers||[]).map(a=>Array.isArray(a)?{text:String(a[0]),points:+a[1]||0}:{text:String(a.text||""),points:+a.points||0}) }));
-  c.teamNames = c.teamNames && c.teamNames.length===2 ? c.teamNames.map(String) : ["DRUŻYNA 1","DRUŻYNA 2"];
+  const defNames=["DRUŻYNA 1","DRUŻYNA 2","DRUŻYNA 3","DRUŻYNA 4"];
+  const tn = Array.isArray(c.teamNames)?c.teamNames.map(String):[];
+  c.teamNames = defNames.map((d,i)=> (tn[i]!=null && tn[i]!=="") ? tn[i] : d);
   c.maxStrikes = +c.maxStrikes||3;
+  c.winPoints = +c.winPoints||2;
   c.finaleTarget = +c.finaleTarget||200;
   return c;
 }
@@ -350,12 +354,16 @@ function saveConfig(){ try{ localStorage.setItem(LS_CFG, JSON.stringify(config))
 let game = freshGame();
 function freshGame(){
   return {
-    mode:"idle",            // idle | question | finale | gameover
+    mode:"idle",
     qIndex:0,
-    progress:{},            // qIndex -> {revealed:[bool], strikes:int}
-    scores:[0,0],
+    progress:{},
+    matchScores:[0,0],
+    standings:[0,1,2,3].map(()=>({played:0,wins:0,points:0})),
+    schedule:[[0,1],[2,3],[0,2],[1,3],[0,3],[1,2]],
+    matchIndex:0,
+    finalistTeam:null,
     finaleIndex:0,
-    finaleProgress:{},      // idx -> {revealed:[bool], awarded:[pts]}
+    finaleProgress:{},
     finaleTotal:0,
     finaleSlots:[],
     fx:{id:0, kind:null},
@@ -441,8 +449,8 @@ function setConn(on, dead){
    ============================================================ */
 function ensureFinaleSlots(){
   const n = (config.finaleQuestions && config.finaleQuestions.length) ? config.finaleQuestions.length : 5;
-  if(!game.finaleSlots || game.finaleSlots.length!==n){
-    game.finaleSlots = Array.from({length:n},()=>({answer:'',points:0,shown:false,revealed:false}));
+  if(!game.finaleSlots || game.finaleSlots.length!==n || game.finaleSlots[0].a1===undefined){
+    game.finaleSlots = Array.from({length:n},()=>({a1:'',p1:0,s1:false,r1:false,a2:'',p2:0,s2:false,r2:false}));
   }
 }
 function buildStatePacket(){
@@ -454,10 +462,11 @@ function buildStatePacket(){
     seq: Date.now(),
     mode: game.mode,
     teamNames: config.teamNames,
-    scores: game.scores,
     maxStrikes: config.maxStrikes,
+    standings: standingsView(),
     fx: game.fx,
   };
+  const pair = game.schedule[game.matchIndex] || [0,1];
   if(game.mode==='question' && q){
     packet.roundName = q.round;
     packet.multiplier = q.multiplier||1;
@@ -468,16 +477,20 @@ function buildStatePacket(){
     packet.strikes = p.strikes;
     packet.pot = pot;
     packet.qShown = !!p.shown;
+    packet.matchTeams = [config.teamNames[pair[0]], config.teamNames[pair[1]]];
+    packet.matchScores = game.matchScores;
+    packet.matchIndex = game.matchIndex;
+    packet.matchTotal = game.schedule.length;
   }
   if(game.mode==='finale'){
     ensureFinaleSlots();
-    const total = game.finaleSlots.reduce((sum,sl)=> sum + (sl.revealed ? (+sl.points||0) : 0), 0);
+    const t1 = game.finaleSlots.reduce((s,sl)=> s + (sl.r1 ? (+sl.p1||0) : 0), 0);
+    const t2 = game.finaleSlots.reduce((s,sl)=> s + (sl.r2 ? (+sl.p2||0) : 0), 0);
     packet.finaleTarget = config.finaleTarget;
-    packet.finaleTotal = total;
-    packet.finSlots = game.finaleSlots.map(sl=>({ answer: sl.shown ? sl.answer : '', shown: !!sl.shown, points: (+sl.points||0), revealed: !!sl.revealed }));
-  }
-  if(game.mode==='gameover'){
-    packet.winner = game.scores[0]===game.scores[1] ? -1 : (game.scores[0]>game.scores[1]?0:1);
+    packet.finNames = ['Gracz 1','Gracz 2'];
+    packet.finTeam = (game.finalistTeam!=null?config.teamNames[game.finalistTeam]:null);
+    packet.finTotals = [t1,t2];
+    packet.finSlots = game.finaleSlots.map(sl=>({ a1: sl.s1?sl.a1:'', s1:!!sl.s1, p1:(+sl.p1||0), r1:!!sl.r1, a2: sl.s2?sl.a2:'', s2:!!sl.s2, p2:(+sl.p2||0), r2:!!sl.r2 }));
   }
   return packet;
 }
@@ -543,29 +556,19 @@ function renderDisplay(s){
       <p class="muted" style="font-size:clamp(16px,3vw,26px); letter-spacing:3px">Zapraszamy do gry!</p></div>`;
     return;
   }
-  if(s.mode==='gameover'){
-    const names=s.teamNames||["D1","D2"];
-    const w = s.winner;
-    body.innerHTML = `<div class="gameover">
-      <div class="roundtag">Koniec gry</div>
-      <div class="win">${w===-1?'REMIS!':esc(names[w])+' WYGRYWA!'}</div>
-      <div class="scoreboard" style="max-width:700px">
-        ${teamHtml(names[0],s.scores[0],w===0)}<div class="potbox"></div>${teamHtml(names[1],s.scores[1],w===1)}
-      </div></div>`;
-    return;
-  }
+  if(s.mode==='standings'){ renderStandingsDisplay(s,'TABELA'); return; }
+  if(s.mode==='gameover'){ renderStandingsDisplay(s,'WYNIKI KOŃCOWE'); return; }
   if(s.mode==='finale'){ renderFinaleDisplay(s); return; }
-  // question
-  const names = s.teamNames||["D1","D2"];
+  const mt = s.matchTeams||["A","B"]; const ms = s.matchScores||[0,0];
   const marks = Array.from({length:s.maxStrikes||3},(_,i)=>`<span class="x ${i<s.strikes?'on':''}">✖</span>`).join('');
   body.innerHTML = `
     <div class="scoreboard">
-      ${teamHtml(names[0],s.scores[0],false)}
+      ${teamHtml(mt[0],ms[0],false)}
       <div class="potbox"><span class="lbl">Pula</span><span class="val">${s.pot||0}</span></div>
-      ${teamHtml(names[1],s.scores[1],false)}
+      ${teamHtml(mt[1],ms[1],false)}
     </div>
-    <div class="roundtag">${esc(s.roundName||'')}${s.multiplier>1?' · mnożnik ×'+s.multiplier:''} &nbsp;·&nbsp; pytanie ${(s.qIndex||0)+1}/${s.qTotal||'?'}</div>
-    <div class="question">${s.qShown ? esc(s.qText||'') : '<span style="letter-spacing:10px;opacity:.5">\u25cf \u25cf \u25cf</span>'}</div>
+    <div class="roundtag">MECZ ${(s.matchIndex||0)+1}/${s.matchTotal||6} &nbsp;·&nbsp; ${esc(s.roundName||'')}${s.multiplier>1?' ×'+s.multiplier:''} &nbsp;·&nbsp; pyt. ${(s.qIndex||0)+1}/${s.qTotal||'?'}</div>
+    <div class="question">${s.qShown ? esc(s.qText||'') : '<span style="letter-spacing:10px;opacity:.5">● ● ●</span>'}</div>
     <div class="board">
       ${(s.answers||[]).map((a,i)=>answerHtml(a,i)).join('')}
       <div class="strikes-row">${marks}</div>
@@ -582,26 +585,33 @@ function answerHtml(a,i){
 }
 function renderFinaleDisplay(s){
   const body=document.getElementById('d-body');
-  const slots = s.finSlots||[];
-  const rowsHtml = slots.map((sl,i)=>{
-    const grey = !sl.shown;
-    return `<tr style="opacity:${grey?0.3:1}; transition:opacity .25s">
-      <td style="width:52px; text-align:center; background:var(--gold); color:#061640; font-family:var(--disp); font-size:clamp(20px,3.4vw,32px); padding:12px 0; border-radius:10px 0 0 10px">${i+1}</td>
-      <td style="background:var(--slot); border-top:1px solid var(--slot-edge); border-bottom:1px solid var(--slot-edge); padding:12px 16px; font-family:var(--disp); text-transform:uppercase; letter-spacing:1px; font-size:clamp(16px,3vw,30px); color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${sl.shown?esc(sl.answer||' '):'— — —'}</td>
-      <td style="width:clamp(66px,11vw,120px); text-align:center; background:${sl.revealed?'#071a49':'var(--panel)'}; border:1px solid var(--slot-edge); border-radius:0 10px 10px 0; font-family:var(--disp); font-size:clamp(20px,3.8vw,38px); color:var(--gold); padding:12px 0">${sl.revealed?sl.points:'▨'}</td>
-    </tr>`;
-  }).join('');
+  const slots=s.finSlots||[]; const names=s.finNames||['Gracz 1','Gracz 2']; const totals=s.finTotals||[0,0];
+  const rowsHtml = slots.map((sl,i)=>`<tr>
+    <td style="width:46px; text-align:center; background:var(--gold); color:#061640; font-family:var(--disp); font-size:clamp(17px,3vw,30px); padding:10px 0; border-radius:8px 0 0 8px">${i+1}</td>
+    <td style="background:var(--slot); border-top:1px solid var(--slot-edge); border-bottom:1px solid var(--slot-edge); padding:10px 12px; font-family:var(--disp); text-transform:uppercase; letter-spacing:1px; font-size:clamp(13px,2.3vw,26px); color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; opacity:${sl.s1?1:0.3}">${sl.s1?esc(sl.a1||' '):'—'}</td>
+    <td style="text-align:center; background:${sl.r1?'#071a49':'var(--panel)'}; border:1px solid var(--slot-edge); font-family:var(--disp); font-size:clamp(15px,2.8vw,30px); color:var(--gold); padding:10px 0">${sl.r1?sl.p1:'▨'}</td>
+    <td style="background:var(--slot); border-top:1px solid var(--slot-edge); border-bottom:1px solid var(--slot-edge); padding:10px 12px; font-family:var(--disp); text-transform:uppercase; letter-spacing:1px; font-size:clamp(13px,2.3vw,26px); color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; opacity:${sl.s2?1:0.3}">${sl.s2?esc(sl.a2||' '):'—'}</td>
+    <td style="text-align:center; background:${sl.r2?'#071a49':'var(--panel)'}; border:1px solid var(--slot-edge); border-radius:0 8px 8px 0; font-family:var(--disp); font-size:clamp(15px,2.8vw,30px); color:var(--gold); padding:10px 0">${sl.r2?sl.p2:'▨'}</td>
+  </tr>`).join('');
+  const sumacell='text-align:center; background:var(--gold); color:#061640; font-family:var(--disp); font-size:clamp(17px,3.2vw,34px); border-radius:8px; padding:8px 0';
+  const sumalbl='text-align:right; font-family:var(--disp); letter-spacing:3px; color:var(--muted); padding:6px 8px; font-size:clamp(13px,2.4vw,24px)';
   body.innerHTML = `
-    <div class="roundtag" style="padding-top:18px; font-size:clamp(18px,3.4vw,28px)">FINAŁ</div>
-    <div style="flex:1; display:flex; align-items:center; justify-content:center; padding:10px clamp(12px,4vw,40px) 24px">
-      <div style="width:100%; max-width:860px; overflow-x:auto">
-        <table style="width:100%; border-collapse:separate; border-spacing:0 10px; table-layout:fixed">
-          <colgroup><col style="width:52px"><col><col style="width:clamp(66px,11vw,120px)"></colgroup>
+    <div class="roundtag" style="padding-top:14px; font-size:clamp(16px,3vw,26px)">FINAŁ${s.finTeam?(' · '+esc(s.finTeam)):''}</div>
+    <div style="flex:1; display:flex; align-items:center; justify-content:center; padding:6px clamp(8px,2.5vw,28px) 20px">
+      <div style="width:100%; max-width:1000px; overflow-x:auto">
+        <table style="width:100%; border-collapse:separate; border-spacing:0 8px; table-layout:fixed">
+          <colgroup><col style="width:46px"><col><col style="width:clamp(56px,8vw,92px)"><col><col style="width:clamp(56px,8vw,92px)"></colgroup>
+          <thead><tr>
+            <th></th>
+            <th colspan="2" style="font-family:var(--disp); color:var(--gold); text-transform:uppercase; font-size:clamp(13px,2.4vw,22px); padding-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${esc(names[0])}</th>
+            <th colspan="2" style="font-family:var(--disp); color:var(--gold); text-transform:uppercase; font-size:clamp(13px,2.4vw,22px); padding-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${esc(names[1])}</th>
+          </tr></thead>
           <tbody>
             ${rowsHtml}
             <tr>
-              <td colspan="2" style="text-align:right; padding:10px 16px; font-family:var(--disp); letter-spacing:4px; color:var(--muted); font-size:clamp(18px,3.4vw,32px)">SUMA</td>
-              <td style="text-align:center; background:var(--gold); color:#061640; font-family:var(--disp); font-size:clamp(22px,4.2vw,42px); border-radius:10px; padding:12px 0">${s.finaleTotal||0}</td>
+              <td></td>
+              <td style="${sumalbl}">SUMA</td><td style="${sumacell}">${totals[0]}</td>
+              <td style="${sumalbl}">SUMA</td><td style="${sumacell}">${totals[1]}</td>
             </tr>
           </tbody>
         </table>
@@ -655,7 +665,7 @@ function updateMicUI(){ const m=document.querySelector('.fin-mic'); if(m){ m.cla
 function handleCmd(d){
   if(!d) return;
   if(d.type==='mic'){ d.on?startMic():stopMic(); }
-  else if(d.type==='jingle'){ if(d.on){ stopSound('start'); playSound('start'); } else stopSound('start'); }  else if(d.type==='roundjingle'){ playSound('round'); }
+  else if(d.type==='jingle'){ if(d.on){ stopSound('start'); playSound('start'); } else stopSound('start'); }  else if(d.type==='roundjingle'){ playSound('round'); }  else if(d.type==='errorsound'){ playSound('bad'); }
 }
 
 /* ============================================================
@@ -691,21 +701,38 @@ function renderControl(){
     return;
   }
   if(game.mode==='intro'){ renderControlIntro(); return; }
+  if(game.mode==='standings'){ renderControlStandings(); return; }
   if(game.mode==='gameover'){ renderControlGameover(); return; }
   if(game.mode==='finale'){ renderControlFinale(); return; }
   renderControlQuestion();
 }
 function roundsCount(){ return new Set(config.questions.map(q=>q.round)).size; }
 
+let matchEnding=false;
 function renderControlQuestion(){
   const body=document.getElementById('c-body');
+  const pair=game.schedule[game.matchIndex]||[0,1];
+  const nmA=config.teamNames[pair[0]], nmB=config.teamNames[pair[1]];
+  if(matchEnding){
+    const a=game.matchScores[0], b=game.matchScores[1];
+    body.innerHTML=`<div class="card">
+      <h3>Zakończyć mecz?</h3>
+      <div class="ctl-meta">Do tabeli dopiszę zdobyte punkty — ${esc(nmA)}: <b style="color:var(--gold)">${a}</b> &nbsp;·&nbsp; ${esc(nmB)}: <b style="color:var(--gold)">${b}</b></div>
+      <button class="btn gold" id="win-ok" style="width:100%; margin-top:10px">✅ Dopisz punkty → tabela</button>
+      <button class="btn ghost" id="win-cancel" style="width:100%; margin-top:8px">Anuluj</button>
+    </div>`;
+    document.getElementById('win-ok').onclick=()=>endMatch();
+    document.getElementById('win-cancel').onclick=()=>{ matchEnding=false; renderControlQuestion(); };
+    return;
+  }
   const q=config.questions[game.qIndex]; const p=curProgress();
   let pot=0; q.answers.forEach((a,i)=>{ if(p.revealed[i]) pot+=a.points; }); pot*=(q.multiplier||1);
   body.innerHTML = `
     <div class="card">
+      <div class="ctl-meta" style="margin-bottom:6px">MECZ ${game.matchIndex+1}/${game.schedule.length}: <b>${esc(nmA)}</b> vs <b>${esc(nmB)}</b></div>
       <div class="ctl-q">${esc(q.text)}</div>
-      <div class="ctl-meta">${esc(q.round)} · mnożnik ×${q.multiplier} · pytanie ${game.qIndex+1}/${config.questions.length}</div>
-      <button class="btn ${p.shown?'':'gold'}" id="toggle-q" style="width:100%; margin:2px 0 10px">${p.shown?'🙈 Ukryj pytanie':'👁 Pokaż pytanie na rzutniku'}</button>
+      <div class="ctl-meta">${esc(q.round)} · ×${q.multiplier} · pytanie ${game.qIndex+1}/${config.questions.length}</div>
+      <button class="btn ${p.shown?'':'gold'}" id="toggle-q" style="width:100%; margin:6px 0 10px">${p.shown?'🙈 Ukryj pytanie':'👁 Pokaż pytanie na rzutniku'}</button>
       <div class="ans-list">
         ${q.answers.map((a,i)=>`<button class="ans-item ${p.revealed[i]?'rev':''}" data-i="${i}">
             <span class="n">${i+1}</span><span class="t">${esc(a.text)}</span><span class="p">${a.points}</span></button>`).join('')}
@@ -715,26 +742,24 @@ function renderControlQuestion(){
       <h3>Błędy</h3>
       <div class="strike-ctl">
         <span class="marks">${'✖'.repeat(p.strikes)||'—'}</span>
-        <div class="row">
-          <button class="btn red" id="add-x">✖ Błąd</button>
-          <button class="btn ghost" id="clr-x">Wyczyść</button>
-        </div>
+        <div class="row"><button class="btn red" id="add-x">✖ Błąd</button><button class="btn ghost" id="clr-x">Wyczyść</button></div>
       </div>
     </div>
     <div class="card">
       <div class="potline"><h3 style="margin:0">Pula</h3><span class="v">${pot}</span></div>
       <div class="grid2">
-        <button class="btn green" data-award="0">Dla: ${esc(config.teamNames[0])}</button>
-        <button class="btn green" data-award="1">Dla: ${esc(config.teamNames[1])}</button>
+        <button class="btn green" data-award="0">Dla: ${esc(nmA)}</button>
+        <button class="btn green" data-award="1">Dla: ${esc(nmB)}</button>
       </div>
     </div>
     <div class="card">
-      <h3>Wyniki</h3>
+      <h3>Wynik meczu</h3>
       ${[0,1].map(t=>`<div class="score-ctl">
-        <span class="nm">${esc(config.teamNames[t])}</span>
+        <span class="nm">${esc(t===0?nmA:nmB)}</span>
         <button class="btn stepbtn" data-step="${t}:-">–</button>
-        <span class="sc" id="sc-${t}">${game.scores[t]}</span>
+        <span class="sc" id="sc-${t}">${game.matchScores[t]}</span>
         <button class="btn stepbtn" data-step="${t}:+">+</button></div>`).join('')}
+      <button class="btn gold" id="end-match" style="width:100%; margin-top:10px">✅ Zakończ mecz → tabela</button>
     </div>
     <div class="card">
       <h3>Nawigacja</h3>
@@ -744,58 +769,66 @@ function renderControlQuestion(){
         <button class="btn" id="next-q">Nast. ▶</button>
       </div>
       <button class="btn gold" id="round-jingle" style="width:100%; margin-top:8px">🎶 Jingiel nowej rundy</button>
-      <div class="row" style="margin-top:8px">
-        <button class="btn" id="to-finale" style="flex:1">🏁 Finał</button>
-        <button class="btn ghost" id="to-end" style="flex:1">🏆 Zakończ grę</button>
-      </div>
       <select id="jump" style="margin-top:8px; width:100%; background:var(--slot); color:var(--fg); border:1px solid var(--slot-edge); border-radius:8px; padding:10px">
         ${config.questions.map((qq,i)=>`<option value="${i}" ${i===game.qIndex?'selected':''}>${i+1}. ${esc(qq.round)} – ${esc(qq.text).slice(0,40)}</option>`).join('')}
       </select>
+      <div class="row" style="margin-top:8px">
+        <button class="btn ghost" id="to-finale" style="flex:1">🏁 Finał</button>
+        <button class="btn ghost" id="to-end" style="flex:1">🏆 Zakończ grę</button>
+      </div>
     </div>`;
-
-  body.querySelectorAll('.ans-item').forEach(b=> b.onclick=()=>{
-    const i=+b.dataset.i; p.revealed[i]=!p.revealed[i];
-    if(p.revealed[i]) pushFx('ding'); else pushFx(null);
-    broadcast(); renderControlQuestion();
-  });
+  body.querySelectorAll('.ans-item').forEach(b=> b.onclick=()=>{ const i=+b.dataset.i; p.revealed[i]=!p.revealed[i]; if(p.revealed[i]) pushFx('ding'); else pushFx(null); broadcast(); renderControlQuestion(); });
   document.getElementById('toggle-q').onclick=()=>{ p.shown=!p.shown; broadcast(); renderControlQuestion(); };
   document.getElementById('add-x').onclick=()=>{ if(p.strikes<config.maxStrikes){ p.strikes++; pushFx('strike'); broadcast(); renderControlQuestion(); } };
   document.getElementById('clr-x').onclick=()=>{ p.strikes=0; pushFx(null); broadcast(); renderControlQuestion(); };
-  body.querySelectorAll('[data-award]').forEach(b=> b.onclick=()=>{
-    const t=+b.dataset.award; game.scores[t]+=pot; pushFx('win'); broadcast(); renderControlQuestion();
-  });
-  body.querySelectorAll('[data-step]').forEach(b=> b.onclick=()=>{
-    const [t,op]=b.dataset.step.split(':'); game.scores[+t]=Math.max(0,game.scores[+t]+(op==='+'?5:-5));
-    broadcast(); document.getElementById('sc-'+t).textContent=game.scores[+t];
-  });
+  body.querySelectorAll('[data-award]').forEach(b=> b.onclick=()=>{ const t=+b.dataset.award; game.matchScores[t]+=pot; pushFx('win'); broadcast(); renderControlQuestion(); });
+  body.querySelectorAll('[data-step]').forEach(b=> b.onclick=()=>{ const [t,op]=b.dataset.step.split(':'); game.matchScores[+t]=Math.max(0,game.matchScores[+t]+(op==='+'?5:-5)); broadcast(); document.getElementById('sc-'+t).textContent=game.matchScores[+t]; });
+  document.getElementById('end-match').onclick=()=>{ matchEnding=true; renderControlQuestion(); };
   document.getElementById('prev-q').onclick=()=>{ if(game.qIndex>0){ game.qIndex--; pushFx(null); broadcast(); renderControlQuestion(); } };
   document.getElementById('next-q').onclick=()=>{ if(game.qIndex<config.questions.length-1){ const oldR=config.questions[game.qIndex].round; game.qIndex++; pushFx(config.questions[game.qIndex].round!==oldR?'round':null); broadcast(); renderControlQuestion(); } };
   document.getElementById('reset-q').onclick=()=>{ game.progress[game.qIndex]={revealed:q.answers.map(()=>false),strikes:0,shown:false}; pushFx(null); broadcast(); renderControlQuestion(); };
-  document.getElementById('jump').onchange=(e)=>{ const oldR=config.questions[game.qIndex].round; game.qIndex=+e.target.value; pushFx(config.questions[game.qIndex].round!==oldR?'round':null); broadcast(); renderControlQuestion(); };
   document.getElementById('round-jingle').onclick=()=>{ if(room&&roomReady) room.emit('cmd',{type:'roundjingle'}); };
-  document.getElementById('to-finale').onclick=()=>{ game.mode='finale'; game.finaleIndex=0; broadcast(); renderControl(); };
+  document.getElementById('jump').onchange=(e)=>{ const oldR=config.questions[game.qIndex].round; game.qIndex=+e.target.value; pushFx(config.questions[game.qIndex].round!==oldR?'round':null); broadcast(); renderControlQuestion(); };
+  document.getElementById('to-finale').onclick=()=>{ game.mode='finale'; ensureFinaleSlots(); broadcast(); renderControl(); };
   document.getElementById('to-end').onclick=()=>{ game.mode='gameover'; pushFx('win'); broadcast(); renderControl(); };
 }
-
+function endMatch(){
+  const pair=game.schedule[game.matchIndex]||[0,1];
+  const a=+game.matchScores[0]||0, b=+game.matchScores[1]||0;
+  game.standings[pair[0]].played++; game.standings[pair[1]].played++;
+  game.standings[pair[0]].points+=a; game.standings[pair[1]].points+=b;
+  if(a>b) game.standings[pair[0]].wins++; else if(b>a) game.standings[pair[1]].wins++;
+  matchEnding=false; game.mode='standings'; pushFx('win'); broadcast(); renderControl();
+}
+let finalePlayer=1;
 function renderControlFinale(){
   ensureFinaleSlots();
+  const P=finalePlayer; const names=['Gracz 1','Gracz 2']; const finTeam=(game.finalistTeam!=null?config.teamNames[game.finalistTeam]:null);
   const body=document.getElementById('c-body');
-  const total = game.finaleSlots.reduce((sum,sl)=> sum + (sl.revealed ? (+sl.points||0) : 0), 0);
-  let html = `<div class="card"><h3>Finał</h3>
-    <div class="ctl-meta">Wpisz odpowiedź uczestnika i punkty, potem odkryj. SUMA: <b style="color:var(--gold)">${total}</b>${config.finaleTarget?(' / '+config.finaleTarget):''}</div></div>`;
+  const t1=game.finaleSlots.reduce((s,sl)=>s+(sl.r1?(+sl.p1||0):0),0);
+  const t2=game.finaleSlots.reduce((s,sl)=>s+(sl.r2?(+sl.p2||0):0),0);
+  let html = `<div class="card"><h3>Finał${finTeam?(' — '+esc(finTeam)):' — dwie osoby'}</h3>
+    <div class="ctl-meta">SUMA — ${esc(names[0])}: <b style="color:var(--gold)">${t1}</b> · ${esc(names[1])}: <b style="color:var(--gold)">${t2}</b>${config.finaleTarget?(' · cel '+config.finaleTarget):''}</div>
+    <div class="grid2" style="margin-top:10px">
+      <button class="btn ${P===1?'gold':''}" data-player="1">① ${esc(names[0])}</button>
+      <button class="btn ${P===2?'gold':''}" data-player="2">② ${esc(names[1])}</button>
+    </div>
+    <button class="btn red" id="fin-error" style="width:100%; margin-top:8px">✖ Sygnał błędu</button>
+  </div>`;
   game.finaleSlots.forEach((sl,i)=>{
-    const q = config.finaleQuestions[i];
-    const hint = q ? q.answers.map(a=>esc(a.text)+' '+a.points).join(' · ') : '';
+    const q=config.finaleQuestions[i];
+    const hint=q?q.answers.map(a=>esc(a.text)+' '+a.points).join(' · '):'';
+    const ans=P===1?sl.a1:sl.a2; const pts=P===1?sl.p1:sl.p2; const rev=P===1?sl.r1:sl.r2;
     html += `<div class="card">
-      <div class="ctl-meta" style="margin-bottom:6px"><b>${i+1}.</b> ${q?esc(q.text):('Odpowiedź '+(i+1))}</div>
-      ${hint?`<div class="muted" style="font-size:12px; margin-bottom:8px">Sugestie: ${hint}</div>`:''}
-      <input id="fa-${i}" placeholder="odpowiedź uczestnika" value="${escAttr(sl.answer||'')}" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--slot-edge); background:var(--slot); color:var(--fg); margin-bottom:8px">
+      <div class="ctl-meta" style="margin-bottom:6px"><b>${i+1}.</b> ${q?esc(q.text):('Pozycja '+(i+1))} <span style="color:var(--gold)">· ${esc(P===1?names[0]:names[1])}</span></div>
+      ${hint?`<div class="muted" style="font-size:12px;margin-bottom:8px">Sugestie: ${hint}</div>`:''}
+      <input id="fa-${i}" placeholder="odpowiedź" value="${escAttr(ans||'')}" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--slot-edge); background:var(--slot); color:var(--fg); margin-bottom:8px">
       <div class="row" style="align-items:center">
-        <input id="fp-${i}" type="number" placeholder="pkt" value="${sl.points?sl.points:''}" style="width:76px; padding:10px; border-radius:8px; border:1px solid var(--slot-edge); background:var(--slot); color:var(--fg)">
-        <button class="btn" data-save="${i}" style="flex:1">💾 Pokaż odpowiedź</button>
-        <button class="btn ${sl.revealed?'ghost':'gold'}" data-reveal="${i}" style="flex:1">${sl.revealed?'✓ Punkty':'👁 Odkryj punkty'}</button>
+        <input id="fp-${i}" type="number" placeholder="pkt" value="${pts?pts:''}" style="width:72px; padding:10px; border-radius:8px; border:1px solid var(--slot-edge); background:var(--slot); color:var(--fg)">
+        <button class="btn" data-save="${i}" style="flex:1">💾 Pokaż</button>
+        <button class="btn ${rev?'ghost':'gold'}" data-reveal="${i}" style="flex:1">${rev?'✓ Pkt':'👁 Odkryj pkt'}</button>
       </div>
-      <div class="muted" style="font-size:12px; margin-top:4px">${sl.shown?('Na planszy: '+esc(sl.answer||'(puste)')):'Jeszcze nie na planszy'}${sl.revealed?(' · '+(+sl.points||0)+' pkt'):''}</div>
+      <div class="muted" style="font-size:11px; margin-top:4px">${esc(names[0])}: ${sl.s1?(esc(sl.a1||'(puste)')+(sl.r1?(' '+(+sl.p1||0)):'')):'—'} &nbsp;|&nbsp; ${esc(names[1])}: ${sl.s2?(esc(sl.a2||'(puste)')+(sl.r2?(' '+(+sl.p2||0)):'')):'—'}</div>
     </div>`;
   });
   html += `<div class="card">
@@ -805,21 +838,23 @@ function renderControlFinale(){
       <button class="btn gold" id="fin-end" style="flex:1">🏆 Zakończ grę</button>
     </div></div>`;
   body.innerHTML = html;
+  body.querySelectorAll('[data-player]').forEach(b=> b.onclick=()=>{ finalePlayer=+b.dataset.player; renderControlFinale(); });
+  document.getElementById('fin-error').onclick=()=>{ if(room&&roomReady) room.emit('cmd',{type:'errorsound'}); };
   game.finaleSlots.forEach((sl,i)=>{
-    const fa=document.getElementById('fa-'+i); const fp=document.getElementById('fp-'+i);
-    if(fa) fa.oninput=e=>{ sl.answer=e.target.value; };
-    if(fp) fp.oninput=e=>{ sl.points=+e.target.value||0; };
+    const fa=document.getElementById('fa-'+i), fp=document.getElementById('fp-'+i);
+    if(fa) fa.oninput=e=>{ if(P===1) sl.a1=e.target.value; else sl.a2=e.target.value; };
+    if(fp) fp.oninput=e=>{ const v=+e.target.value||0; if(P===1) sl.p1=v; else sl.p2=v; };
   });
   body.querySelectorAll('[data-save]').forEach(b=> b.onclick=()=>{
     const i=+b.dataset.save; const sl=game.finaleSlots[i];
-    const fa=document.getElementById('fa-'+i); const fp=document.getElementById('fp-'+i);
-    sl.answer=fa.value; sl.points=+fp.value||0; sl.shown=true;
+    const fa=document.getElementById('fa-'+i), fp=document.getElementById('fp-'+i);
+    if(P===1){ sl.a1=fa.value; sl.p1=+fp.value||0; sl.s1=true; } else { sl.a2=fa.value; sl.p2=+fp.value||0; sl.s2=true; }
     broadcast(); renderControlFinale();
   });
   body.querySelectorAll('[data-reveal]').forEach(b=> b.onclick=()=>{
     const i=+b.dataset.reveal; const sl=game.finaleSlots[i];
-    const fa=document.getElementById('fa-'+i); const fp=document.getElementById('fp-'+i);
-    sl.answer=fa.value; sl.points=+fp.value||0; sl.shown=true; sl.revealed=true;
+    const fa=document.getElementById('fa-'+i), fp=document.getElementById('fp-'+i);
+    if(P===1){ sl.a1=fa.value; sl.p1=+fp.value||0; sl.s1=true; sl.r1=true; } else { sl.a2=fa.value; sl.p2=+fp.value||0; sl.s2=true; sl.r2=true; }
     pushFx('good'); broadcast(); renderControlFinale();
   });
   document.getElementById('fin-clear').onclick=()=>{ game.finaleSlots=null; ensureFinaleSlots(); broadcast(); renderControlFinale(); };
@@ -840,17 +875,19 @@ function renderControlIntro(){
 }
 function renderControlGameover(){
   const body=document.getElementById('c-body');
-  const w = game.scores[0]===game.scores[1]?-1:(game.scores[0]>game.scores[1]?0:1);
+  const st=standingsView();
   body.innerHTML=`<div class="card" style="text-align:center">
     <h3>Koniec gry</h3>
-    <div class="ctl-q" style="font-size:26px; color:var(--gold)">${w===-1?'REMIS':esc(config.teamNames[w])+' wygrywa!'}</div>
-    <div class="ctl-meta">${esc(config.teamNames[0])}: ${game.scores[0]} · ${esc(config.teamNames[1])}: ${game.scores[1]}</div>
+    <div class="ctl-q" style="font-size:22px; color:var(--gold)">🏆 ${st[0]?esc(st[0].name):''}</div>
+    <div class="ans-list" style="margin-top:10px">
+      ${st.map((t,i)=>`<div class="ans-item" style="${i===0?'border-color:var(--gold)':''}"><span class="n">${i+1}</span><span class="t">${esc(t.name)}</span><span class="p">${t.points}</span></div>`).join('')}
+    </div>
     <div class="row" style="margin-top:12px">
-      <button class="btn" id="back-game" style="flex:1">↩ Wróć do gry</button>
+      <button class="btn" id="back-game" style="flex:1">↩ Wróć</button>
       <button class="btn gold" id="new-game" style="flex:1">🔄 Nowa gra</button>
     </div></div>`;
-  document.getElementById('back-game').onclick=()=>{ game.mode='question'; broadcast(); renderControl(); };
-  document.getElementById('new-game').onclick=()=>{ if(!confirmReset()) return; game=freshGame(); game.mode='idle'; broadcast(); renderControl(); };
+  document.getElementById('back-game').onclick=()=>{ game.mode='standings'; broadcast(); renderControl(); };
+  document.getElementById('new-game').onclick=()=>{ game=freshGame(); game.mode='idle'; broadcast(); renderControl(); };
 }
 let _confirmArmed=false;
 function confirmReset(){ return true; }
@@ -858,6 +895,73 @@ function confirmReset(){ return true; }
 /* ============================================================
    EDYTOR
    ============================================================ */
+function standingsView(){
+  return game.standings.map((s,i)=>({name:config.teamNames[i], idx:i, played:s.played, wins:s.wins, points:s.points}))
+    .sort((a,b)=> b.points-a.points || b.wins-a.wins || a.name.localeCompare(b.name));
+}
+function renderStandingsDisplay(s,title){
+  const body=document.getElementById('d-body');
+  const st=s.standings||[];
+  const rows=st.map((t,i)=>{
+    const bg=i===0?'rgba(255,210,74,.16)':'var(--slot)';
+    const col=i===0?'var(--gold)':'var(--fg)';
+    return `<tr>
+      <td style="width:58px; text-align:center; background:${bg}; border:1px solid var(--slot-edge); border-radius:8px 0 0 8px; font-family:var(--disp); font-size:clamp(17px,3.2vw,30px); color:${col}; padding:10px 0">${i+1}</td>
+      <td style="background:${bg}; border-top:1px solid var(--slot-edge); border-bottom:1px solid var(--slot-edge); font-family:var(--disp); text-transform:uppercase; letter-spacing:1px; font-size:clamp(15px,2.9vw,28px); color:${col}; padding:10px 12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${esc(t.name)}</td>
+      <td style="width:56px; text-align:center; background:${bg}; border-top:1px solid var(--slot-edge); border-bottom:1px solid var(--slot-edge); font-family:var(--disp); color:var(--muted); font-size:clamp(14px,2.6vw,24px)">${t.played}</td>
+      <td style="width:56px; text-align:center; background:${bg}; border-top:1px solid var(--slot-edge); border-bottom:1px solid var(--slot-edge); font-family:var(--disp); color:var(--muted); font-size:clamp(14px,2.6vw,24px)">${t.wins}</td>
+      <td style="width:76px; text-align:center; background:${bg}; border:1px solid var(--slot-edge); border-radius:0 8px 8px 0; font-family:var(--disp); color:var(--gold); font-size:clamp(19px,3.4vw,34px)">${t.points}</td>
+    </tr>`;
+  }).join('');
+  body.innerHTML = `
+    <div class="roundtag" style="padding-top:16px; font-size:clamp(18px,3.4vw,30px); color:var(--gold)">${title}</div>
+    <div style="flex:1; display:flex; align-items:center; justify-content:center; padding:8px clamp(10px,3vw,30px) 22px">
+      <div style="width:100%; max-width:760px; overflow-x:auto">
+        <table style="width:100%; border-collapse:separate; border-spacing:0 8px; table-layout:fixed">
+          <colgroup><col style="width:58px"><col><col style="width:56px"><col style="width:56px"><col style="width:76px"></colgroup>
+          <thead><tr>
+            <th></th>
+            <th style="text-align:left; color:var(--muted); font-family:var(--disp); font-size:clamp(12px,2.2vw,18px); padding:0 12px 4px">DRUŻYNA</th>
+            <th style="color:var(--muted); font-family:var(--disp); font-size:clamp(11px,2vw,16px)">M</th>
+            <th style="color:var(--muted); font-family:var(--disp); font-size:clamp(11px,2vw,16px)">W</th>
+            <th style="color:var(--muted); font-family:var(--disp); font-size:clamp(11px,2vw,16px)">PKT</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+function renderControlStandings(){
+  const body=document.getElementById('c-body');
+  const st=standingsView();
+  const done = game.matchIndex >= game.schedule.length-1;
+  const nextPair = game.schedule[game.matchIndex+1];
+  let html=`<div class="card"><h3>Tabela</h3>
+    <div class="ans-list">
+      ${st.map((t,i)=>`<div class="ans-item" style="${i===0?'border-color:var(--gold)':''}">
+        <span class="n">${i+1}</span><span class="t">${esc(t.name)}</span>
+        <span class="muted" style="font-size:12px">M${t.played} · W${t.wins}</span>
+        <span class="p">${t.points}</span></div>`).join('')}
+    </div></div>
+  <div class="card">
+    <div class="ctl-meta">Mecz ${game.matchIndex+1}/${game.schedule.length} rozegrany.</div>`;
+  if(!done && nextPair){
+    html += `<button class="btn gold big" id="next-match" style="width:100%; margin-top:6px">▶ Następny mecz: ${esc(config.teamNames[nextPair[0]])} vs ${esc(config.teamNames[nextPair[1]])}</button>`;
+  } else {
+    html += `<button class="btn gold big" id="to-finale2" style="width:100%; margin-top:6px">🏁 Do finału: ${esc(st[0]?st[0].name:'')}</button>`;
+  }
+  html += `<div class="row" style="margin-top:8px">
+      <button class="btn ghost" id="back-match" style="flex:1">↩ Wróć do meczu</button>
+      <button class="btn ghost" id="to-end2" style="flex:1">🏆 Zakończ grę</button>
+    </div></div>`;
+  body.innerHTML=html;
+  const nm=document.getElementById('next-match');
+  if(nm) nm.onclick=()=>{ game.matchIndex++; game.matchScores=[0,0]; game.progress={}; game.mode='question'; pushFx('round'); broadcast(); renderControl(); };
+  const tf=document.getElementById('to-finale2');
+  if(tf) tf.onclick=()=>{ game.finalistTeam = standingsView()[0].idx; game.mode='finale'; ensureFinaleSlots(); broadcast(); renderControl(); };
+  document.getElementById('back-match').onclick=()=>{ game.mode='question'; broadcast(); renderControl(); };
+  document.getElementById('to-end2').onclick=()=>{ game.mode='gameover'; pushFx('win'); broadcast(); renderControl(); };
+}
 function openEditor(){
   const draft = JSON.parse(JSON.stringify(config));
   const wrap=document.createElement('div'); wrap.className='modal'; wrap.id='editor';
@@ -869,6 +973,8 @@ function openEditor(){
     <div class="grid2">
       <div><label class="tag">Drużyna 1</label><input id="ed-t0" value="${escAttr(draft.teamNames[0])}"></div>
       <div><label class="tag">Drużyna 2</label><input id="ed-t1" value="${escAttr(draft.teamNames[1])}"></div>
+      <div><label class="tag">Drużyna 3</label><input id="ed-t2" value="${escAttr(draft.teamNames[2]||'')}"></div>
+      <div><label class="tag">Drużyna 4</label><input id="ed-t3" value="${escAttr(draft.teamNames[3]||'')}"></div>
     </div>
     <div class="grid2" style="margin-top:8px">
       <div><label class="tag">Maks. błędów (X)</label><input id="ed-max" type="number" value="${draft.maxStrikes}"></div>
@@ -946,9 +1052,9 @@ function openEditor(){
   wrap.querySelector('#ed-import').onclick=()=>{ try{ const o=normalizeConfig(JSON.parse(wrap.querySelector('#ed-io').value)); Object.assign(draft,o); renderQ(); renderFQ(); fillHeader(); flashBtn(wrap.querySelector('#ed-import'),'✔ Wczytano'); }catch(e){ flashBtn(wrap.querySelector('#ed-import'),'✖ Błąd JSON'); } };
   wrap.querySelector('#ed-file').onchange=(e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ const o=normalizeConfig(JSON.parse(r.result)); Object.assign(draft,o); renderQ(); renderFQ(); fillHeader(); }catch(err){ alert&&0; } }; r.readAsText(f); };
 
-  function fillHeader(){ wrap.querySelector('#ed-t0').value=draft.teamNames[0]; wrap.querySelector('#ed-t1').value=draft.teamNames[1]; wrap.querySelector('#ed-max').value=draft.maxStrikes; wrap.querySelector('#ed-target').value=draft.finaleTarget; }
+  function fillHeader(){ wrap.querySelector('#ed-t0').value=draft.teamNames[0]; wrap.querySelector('#ed-t1').value=draft.teamNames[1]; wrap.querySelector('#ed-t2').value=draft.teamNames[2]||''; wrap.querySelector('#ed-t3').value=draft.teamNames[3]||''; wrap.querySelector('#ed-max').value=draft.maxStrikes; wrap.querySelector('#ed-target').value=draft.finaleTarget; }
   function pull(){
-    draft.teamNames=[wrap.querySelector('#ed-t0').value||'DRUŻYNA 1', wrap.querySelector('#ed-t1').value||'DRUŻYNA 2'];
+    draft.teamNames=[wrap.querySelector('#ed-t0').value||'DRUŻYNA 1', wrap.querySelector('#ed-t1').value||'DRUŻYNA 2', wrap.querySelector('#ed-t2').value||'DRUŻYNA 3', wrap.querySelector('#ed-t3').value||'DRUŻYNA 4'];
     draft.maxStrikes=+wrap.querySelector('#ed-max').value||3;
     draft.finaleTarget=+wrap.querySelector('#ed-target').value||200;
   }
