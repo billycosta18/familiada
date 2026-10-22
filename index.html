@@ -233,7 +233,7 @@ textarea.io{width:100%; min-height:120px; font-family:ui-monospace,monospace; fo
       </button>
     </div>
     <p style="margin-top:18px; font-size:13px">Grasz na jednym urządzeniu? Wybierz <b>Panel prowadzącego</b> – ma podgląd planszy.</p>
-    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 19 · tabela + animacje</div>
+    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 20 · zapasowe serwery</div>
   </div>
 </div>
 
@@ -413,29 +413,35 @@ async function enterRole(){
 
 function topicBase(){ return 'familiada/'+roomName+'/'; }
 function pub(sub, obj, retain){ try{ if(mq && mqReady) mq.publish(topicBase()+sub, JSON.stringify(obj), {retain:!!retain, qos:0}); }catch(e){} }
+var BROKERS=['wss://broker.emqx.io:8084/mqtt','wss://broker.hivemq.com:8884/mqtt','wss://test.mosquitto.org:8081/mqtt'];
+function subscribeAll(){
+  var b=topicBase();
+  if(role==='control'){ mq.subscribe(b+'transcript'); mq.publish(b+'state','',{retain:true}); broadcast(); }
+  else { mq.subscribe(b+'state'); mq.subscribe(b+'cmd'); }
+}
+function onMsg(topic,payload){
+  var d; try{ d=JSON.parse(payload.toString()); }catch(e){ return; }
+  var b=topicBase();
+  if(topic===b+'state' && role==='display') applyState(d);
+  else if(topic===b+'transcript' && role==='control') onTranscript(d&&d.text||'');
+  else if(topic===b+'cmd' && role==='display') handleCmd(d);
+}
+function tryBroker(i){
+  if(typeof mqtt==='undefined'){ setConn(false,true); return; }
+  var url=BROKERS[i%BROKERS.length]; var gotConnect=false;
+  try{ mq=mqtt.connect(url,{clientId:'fam_'+role+'_'+Math.random().toString(16).slice(2,10), reconnectPeriod:0, connectTimeout:6000, clean:true}); }
+  catch(e){ scheduleNext(i); return; }
+  var timer=setTimeout(function(){ if(!gotConnect){ try{mq.end(true);}catch(e){} scheduleNext(i); } }, 7000);
+  mq.on('connect', function(){ gotConnect=true; clearTimeout(timer); mqReady=true; roomReady=true; setConn(true,false); subscribeAll(); });
+  mq.on('message', onMsg);
+  mq.on('close', function(){ mqReady=false; setConn(false,false); if(gotConnect){ setTimeout(function(){ tryBroker(i); }, 2500); } });
+  mq.on('error', function(){});
+}
+function scheduleNext(i){ setConn(false,false); if(i+1 < BROKERS.length){ tryBroker(i+1); } else { setTimeout(function(){ tryBroker(0); }, 4000); } }
 function connectRoom(){
   if(typeof mqtt==='undefined'){ setConn(false,true); return; }
   room = { emit:function(t,d){ pub(t, d, t==='state'); return Promise.resolve(); } };
-  try{
-    mq = mqtt.connect('wss://broker.emqx.io:8084/mqtt', { clientId:'fam_'+role+'_'+Math.random().toString(16).slice(2,10), reconnectPeriod:2500, connectTimeout:8000, clean:true });
-  }catch(e){ setConn(false,true); return; }
-  mq.on('connect', function(){
-    mqReady=true; roomReady=true; setConn(true,false);
-    var b=topicBase();
-    if(role==='control'){ mq.subscribe(b+'transcript'); mq.publish(b+'state','',{retain:true}); broadcast(); }
-    else { mq.subscribe(b+'state'); mq.subscribe(b+'cmd'); }
-  });
-  mq.on('reconnect', function(){ setConn(false,false); });
-  mq.on('close', function(){ mqReady=false; setConn(false,false); });
-  mq.on('offline', function(){ mqReady=false; setConn(false,false); });
-  mq.on('error', function(){});
-  mq.on('message', function(topic,payload){
-    var d; try{ d=JSON.parse(payload.toString()); }catch(e){ return; }
-    var b=topicBase();
-    if(topic===b+'state' && role==='display') applyState(d);
-    else if(topic===b+'transcript' && role==='control') onTranscript(d&&d.text||'');
-    else if(topic===b+'cmd' && role==='display') handleCmd(d);
-  });
+  tryBroker(0);
   if(role==='control') setInterval(function(){ if(role==='control') broadcast(); }, 3000);
 }
 function setConn(on, dead){
