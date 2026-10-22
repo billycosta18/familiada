@@ -233,7 +233,7 @@ textarea.io{width:100%; min-height:120px; font-family:ui-monospace,monospace; fo
       </button>
     </div>
     <p style="margin-top:18px; font-size:13px">Grasz na jednym urządzeniu? Wybierz <b>Panel prowadzącego</b> – ma podgląd planszy.</p>
-    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 16 · finał suma razem</div>
+    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 17 · zasady + jingiel pętla</div>
   </div>
 </div>
 
@@ -556,6 +556,7 @@ function renderDisplay(s){
       <p class="muted" style="font-size:clamp(16px,3vw,26px); letter-spacing:3px">Zapraszamy do gry!</p></div>`;
     return;
   }
+  if(s.mode==='rules'){ renderRulesDisplay(s); return; }
   if(s.mode==='standings'){ renderStandingsDisplay(s,'TABELA'); return; }
   if(s.mode==='gameover'){ renderStandingsDisplay(s,'WYNIKI KOŃCOWE'); return; }
   if(s.mode==='finale'){ renderFinaleDisplay(s); return; }
@@ -665,7 +666,7 @@ function updateMicUI(){ const m=document.querySelector('.fin-mic'); if(m){ m.cla
 function handleCmd(d){
   if(!d) return;
   if(d.type==='mic'){ d.on?startMic():stopMic(); }
-  else if(d.type==='jingle'){ if(d.on){ stopSound('start'); playSound('start'); } else stopSound('start'); }  else if(d.type==='roundjingle'){ playSound('round'); }  else if(d.type==='errorsound'){ playSound('bad'); }
+  else if(d.type==='jingle'){ if(d.on){ stopSound('start'); playSound('start', true); } else stopSound('start'); }  else if(d.type==='roundjingle'){ playSound('round'); }  else if(d.type==='errorsound'){ playSound('bad'); }
 }
 
 /* ============================================================
@@ -701,6 +702,7 @@ function renderControl(){
     return;
   }
   if(game.mode==='intro'){ renderControlIntro(); return; }
+  if(game.mode==='rules'){ renderControlRules(); return; }
   if(game.mode==='standings'){ renderControlStandings(); return; }
   if(game.mode==='gameover'){ renderControlGameover(); return; }
   if(game.mode==='finale'){ renderControlFinale(); return; }
@@ -858,12 +860,26 @@ function renderControlIntro(){
   const body=document.getElementById('c-body');
   body.innerHTML=`<div class="card" style="text-align:center">
     <h3>Ekran tytułowy</h3>
-    <p class="muted" style="margin-bottom:6px">Na rzutniku widać planszę „FAMILIADA". Możesz puścić jingiel (🎵 u góry). Gdy będziesz gotowy — zacznij grę.</p>
-    <button class="btn gold big" style="width:100%; margin-top:6px" id="go-q1">▶ Zacznij od 1. pytania</button>
+    <p class="muted" style="margin-bottom:6px">Na rzutniku widać „FAMILIADA". Możesz puścić jingiel (🎵 u góry). Najpierw pokaż zasady, potem zacznij turniej.</p>
+    <button class="btn gold big" style="width:100%; margin-top:6px" id="go-rules">📋 Pokaż zasady gry</button>
+    <button class="btn ghost" style="width:100%; margin-top:8px" id="go-q1">▶ Pomiń zasady → 1. pytanie</button>
     <button class="btn ghost" style="width:100%; margin-top:8px" id="go-idle">◀ Wróć</button>
   </div>`;
-  document.getElementById('go-q1').onclick=()=>{ game.matchIndex=0; game.qIndex=0; game.matchScores=[0,0]; game.progress={}; game.standings=[0,1,2,3].map(()=>({played:0,wins:0,points:0})); game.mode='question'; pushFx('round'); broadcast(); renderControl(); };
+  const startT=()=>{ game.matchIndex=0; game.qIndex=0; game.matchScores=[0,0]; game.progress={}; game.standings=[0,1,2,3].map(()=>({played:0,wins:0,points:0})); game.mode='question'; pushFx('round'); broadcast(); renderControl(); };
+  document.getElementById('go-rules').onclick=()=>{ game.mode='rules'; broadcast(); renderControl(); };
+  document.getElementById('go-q1').onclick=startT;
   document.getElementById('go-idle').onclick=()=>{ game.mode='idle'; broadcast(); renderControl(); };
+}
+function renderControlRules(){
+  const body=document.getElementById('c-body');
+  body.innerHTML=`<div class="card" style="text-align:center">
+    <h3>Zasady na rzutniku</h3>
+    <p class="muted" style="margin-bottom:6px">Na ekranie wyświetlają się zasady turnieju (faza grupowa + finał). Gdy publiczność przeczyta — rozpocznij.</p>
+    <button class="btn gold big" style="width:100%; margin-top:6px" id="go-start-t">▶ Rozpocznij turniej (1. pytanie)</button>
+    <button class="btn ghost" style="width:100%; margin-top:8px" id="rules-back">◀ Wróć</button>
+  </div>`;
+  document.getElementById('go-start-t').onclick=()=>{ game.matchIndex=0; game.qIndex=0; game.matchScores=[0,0]; game.progress={}; game.standings=[0,1,2,3].map(()=>({played:0,wins:0,points:0})); game.mode='question'; pushFx('round'); broadcast(); renderControl(); };
+  document.getElementById('rules-back').onclick=()=>{ game.mode='intro'; broadcast(); renderControl(); };
 }
 function renderControlGameover(){
   const body=document.getElementById('c-body');
@@ -953,6 +969,30 @@ function renderControlStandings(){
   if(tf) tf.onclick=()=>{ game.finalistTeam = standingsView()[0].idx; game.mode='finale'; ensureFinaleSlots(); broadcast(); renderControl(); };
   document.getElementById('back-match').onclick=()=>{ game.mode='question'; broadcast(); renderControl(); };
   document.getElementById('to-end2').onclick=()=>{ game.mode='gameover'; pushFx('win'); broadcast(); renderControl(); };
+}
+function renderRulesDisplay(s){
+  const body=document.getElementById('d-body');
+  body.innerHTML = `
+    <div class="roundtag" style="padding-top:18px; font-size:clamp(18px,3.4vw,30px); color:var(--gold)">ZASADY GRY</div>
+    <div style="flex:1; display:flex; align-items:center; justify-content:center; padding:10px clamp(14px,4vw,50px) 26px">
+      <div style="width:100%; max-width:920px; display:flex; flex-direction:column; gap:clamp(12px,2.5vh,22px)">
+        <div style="background:linear-gradient(180deg,var(--slot),#071f52); border:1px solid var(--slot-edge); border-radius:16px; padding:clamp(14px,3vw,26px)">
+          <div style="font-family:var(--disp); color:var(--gold); text-transform:uppercase; letter-spacing:2px; font-size:clamp(18px,3.4vw,30px); margin-bottom:8px">Faza grupowa</div>
+          <ul style="margin:0; padding-left:1.1em; font-family:var(--body); font-size:clamp(15px,2.8vw,26px); line-height:1.5; color:var(--fg)">
+            <li>4 drużyny grają <b>każda z każdą</b> — łącznie 6 meczów.</li>
+            <li>Każdy mecz to <b>jedno pytanie</b>; za trafione odpowiedzi drużyny zdobywają punkty.</li>
+            <li>Zdobyte punkty trafiają do <b>tabeli</b>, którą pokazujemy po każdym meczu.</li>
+          </ul>
+        </div>
+        <div style="background:linear-gradient(180deg,var(--slot),#071f52); border:1px solid var(--slot-edge); border-radius:16px; padding:clamp(14px,3vw,26px)">
+          <div style="font-family:var(--disp); color:var(--gold); text-transform:uppercase; letter-spacing:2px; font-size:clamp(18px,3.4vw,30px); margin-bottom:8px">Finał</div>
+          <ul style="margin:0; padding-left:1.1em; font-family:var(--body); font-size:clamp(15px,2.8vw,26px); line-height:1.5; color:var(--fg)">
+            <li>Do finału awansuje drużyna z <b>największą liczbą punktów</b>.</li>
+            <li>Dwie osoby z tej drużyny odpowiadają na pytania — liczy się ich <b>łączny wynik</b>.</li>
+          </ul>
+        </div>
+      </div>
+    </div>`;
 }
 function openEditor(){
   const draft = JSON.parse(JSON.stringify(config));
