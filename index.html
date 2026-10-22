@@ -233,7 +233,7 @@ textarea.io{width:100%; min-height:120px; font-family:ui-monospace,monospace; fo
       </button>
     </div>
     <p style="margin-top:18px; font-size:13px">Grasz na jednym urządzeniu? Wybierz <b>Panel prowadzącego</b> – ma podgląd planszy.</p>
-    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 14 · punkty z odpowiedzi</div>
+    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 16 · finał suma razem</div>
   </div>
 </div>
 
@@ -567,7 +567,7 @@ function renderDisplay(s){
       <div class="potbox"><span class="lbl">Pula</span><span class="val">${s.pot||0}</span></div>
       ${teamHtml(mt[1],ms[1],false)}
     </div>
-    <div class="roundtag">MECZ ${(s.matchIndex||0)+1}/${s.matchTotal||6} &nbsp;·&nbsp; ${esc(s.roundName||'')}${s.multiplier>1?' ×'+s.multiplier:''} &nbsp;·&nbsp; pyt. ${(s.qIndex||0)+1}/${s.qTotal||'?'}</div>
+    <div class="roundtag">MECZ ${(s.matchIndex||0)+1}/${s.matchTotal||6} &nbsp;·&nbsp; ${esc(s.roundName||'')}${s.multiplier>1?' ×'+s.multiplier:''}</div>
     <div class="question">${s.qShown ? esc(s.qText||'') : '<span style="letter-spacing:10px;opacity:.5">● ● ●</span>'}</div>
     <div class="board">
       ${(s.answers||[]).map((a,i)=>answerHtml(a,i)).join('')}
@@ -611,7 +611,7 @@ function renderFinaleDisplay(s){
             <tr>
               <td></td>
               <td style="${sumalbl}">SUMA</td><td style="${sumacell}">${totals[0]}</td>
-              <td style="${sumalbl}">SUMA</td><td style="${sumacell}">${totals[1]}</td>
+              <td style="${sumalbl}">RAZEM</td><td style="${sumacell}">${totals[0]+totals[1]}</td>
             </tr>
           </tbody>
         </table>
@@ -731,7 +731,7 @@ function renderControlQuestion(){
     <div class="card">
       <div class="ctl-meta" style="margin-bottom:6px">MECZ ${game.matchIndex+1}/${game.schedule.length}: <b>${esc(nmA)}</b> vs <b>${esc(nmB)}</b></div>
       <div class="ctl-q">${esc(q.text)}</div>
-      <div class="ctl-meta">${esc(q.round)} · ×${q.multiplier} · pytanie ${game.qIndex+1}/${config.questions.length}</div>
+      <div class="ctl-meta">${esc(q.round)}${q.multiplier>1?(' · ×'+q.multiplier):''} · pytanie meczu</div>
       <button class="btn ${p.shown?'':'gold'}" id="toggle-q" style="width:100%; margin:6px 0 10px">${p.shown?'🙈 Ukryj pytanie':'👁 Pokaż pytanie na rzutniku'}</button>
       <div class="ans-list">
         ${q.answers.map((a,i)=>`<button class="ans-item ${p.revealed[i]?'rev':''}" data-i="${i}">
@@ -762,16 +762,11 @@ function renderControlQuestion(){
       <button class="btn gold" id="end-match" style="width:100%; margin-top:10px">✅ Zakończ mecz → tabela</button>
     </div>
     <div class="card">
-      <h3>Nawigacja</h3>
-      <div class="grid3">
-        <button class="btn" id="prev-q">◀ Poprz.</button>
-        <button class="btn ghost" id="reset-q">Wyczyść pytanie</button>
-        <button class="btn" id="next-q">Nast. ▶</button>
+      <h3>Opcje</h3>
+      <div class="row">
+        <button class="btn ghost" id="reset-q" style="flex:1">♻ Wyczyść pytanie</button>
+        <button class="btn gold" id="round-jingle" style="flex:1">🎶 Jingiel</button>
       </div>
-      <button class="btn gold" id="round-jingle" style="width:100%; margin-top:8px">🎶 Jingiel nowej rundy</button>
-      <select id="jump" style="margin-top:8px; width:100%; background:var(--slot); color:var(--fg); border:1px solid var(--slot-edge); border-radius:8px; padding:10px">
-        ${config.questions.map((qq,i)=>`<option value="${i}" ${i===game.qIndex?'selected':''}>${i+1}. ${esc(qq.round)} – ${esc(qq.text).slice(0,40)}</option>`).join('')}
-      </select>
       <div class="row" style="margin-top:8px">
         <button class="btn ghost" id="to-finale" style="flex:1">🏁 Finał</button>
         <button class="btn ghost" id="to-end" style="flex:1">🏆 Zakończ grę</button>
@@ -784,11 +779,8 @@ function renderControlQuestion(){
   body.querySelectorAll('[data-award]').forEach(b=> b.onclick=()=>{ const t=+b.dataset.award; game.matchScores[t]+=pot; pushFx('win'); broadcast(); renderControlQuestion(); });
   body.querySelectorAll('[data-step]').forEach(b=> b.onclick=()=>{ const [t,op]=b.dataset.step.split(':'); game.matchScores[+t]=Math.max(0,game.matchScores[+t]+(op==='+'?5:-5)); broadcast(); document.getElementById('sc-'+t).textContent=game.matchScores[+t]; });
   document.getElementById('end-match').onclick=()=>{ matchEnding=true; renderControlQuestion(); };
-  document.getElementById('prev-q').onclick=()=>{ if(game.qIndex>0){ game.qIndex--; pushFx(null); broadcast(); renderControlQuestion(); } };
-  document.getElementById('next-q').onclick=()=>{ if(game.qIndex<config.questions.length-1){ const oldR=config.questions[game.qIndex].round; game.qIndex++; pushFx(config.questions[game.qIndex].round!==oldR?'round':null); broadcast(); renderControlQuestion(); } };
   document.getElementById('reset-q').onclick=()=>{ game.progress[game.qIndex]={revealed:q.answers.map(()=>false),strikes:0,shown:false}; pushFx(null); broadcast(); renderControlQuestion(); };
   document.getElementById('round-jingle').onclick=()=>{ if(room&&roomReady) room.emit('cmd',{type:'roundjingle'}); };
-  document.getElementById('jump').onchange=(e)=>{ const oldR=config.questions[game.qIndex].round; game.qIndex=+e.target.value; pushFx(config.questions[game.qIndex].round!==oldR?'round':null); broadcast(); renderControlQuestion(); };
   document.getElementById('to-finale').onclick=()=>{ game.mode='finale'; ensureFinaleSlots(); broadcast(); renderControl(); };
   document.getElementById('to-end').onclick=()=>{ game.mode='gameover'; pushFx('win'); broadcast(); renderControl(); };
 }
@@ -808,7 +800,7 @@ function renderControlFinale(){
   const t1=game.finaleSlots.reduce((s,sl)=>s+(sl.r1?(+sl.p1||0):0),0);
   const t2=game.finaleSlots.reduce((s,sl)=>s+(sl.r2?(+sl.p2||0):0),0);
   let html = `<div class="card"><h3>Finał${finTeam?(' — '+esc(finTeam)):' — dwie osoby'}</h3>
-    <div class="ctl-meta">SUMA — ${esc(names[0])}: <b style="color:var(--gold)">${t1}</b> · ${esc(names[1])}: <b style="color:var(--gold)">${t2}</b>${config.finaleTarget?(' · cel '+config.finaleTarget):''}</div>
+    <div class="ctl-meta">SUMA — ${esc(names[0])}: <b style="color:var(--gold)">${t1}</b> · RAZEM: <b style="color:var(--gold)">${t1+t2}</b>${config.finaleTarget?(' · cel '+config.finaleTarget):''}</div>
     <div class="grid2" style="margin-top:10px">
       <button class="btn ${P===1?'gold':''}" data-player="1">① ${esc(names[0])}</button>
       <button class="btn ${P===2?'gold':''}" data-player="2">② ${esc(names[1])}</button>
@@ -870,7 +862,7 @@ function renderControlIntro(){
     <button class="btn gold big" style="width:100%; margin-top:6px" id="go-q1">▶ Zacznij od 1. pytania</button>
     <button class="btn ghost" style="width:100%; margin-top:8px" id="go-idle">◀ Wróć</button>
   </div>`;
-  document.getElementById('go-q1').onclick=()=>{ game.mode='question'; game.qIndex=0; game.progress={}; pushFx('round'); broadcast(); renderControl(); };
+  document.getElementById('go-q1').onclick=()=>{ game.matchIndex=0; game.qIndex=0; game.matchScores=[0,0]; game.progress={}; game.standings=[0,1,2,3].map(()=>({played:0,wins:0,points:0})); game.mode='question'; pushFx('round'); broadcast(); renderControl(); };
   document.getElementById('go-idle').onclick=()=>{ game.mode='idle'; broadcast(); renderControl(); };
 }
 function renderControlGameover(){
@@ -956,7 +948,7 @@ function renderControlStandings(){
     </div></div>`;
   body.innerHTML=html;
   const nm=document.getElementById('next-match');
-  if(nm) nm.onclick=()=>{ game.matchIndex++; game.matchScores=[0,0]; game.progress={}; game.mode='question'; pushFx('round'); broadcast(); renderControl(); };
+  if(nm) nm.onclick=()=>{ game.matchIndex++; game.qIndex=Math.min(game.matchIndex, config.questions.length-1); game.matchScores=[0,0]; game.progress={}; game.mode='question'; pushFx('round'); broadcast(); renderControl(); };
   const tf=document.getElementById('to-finale2');
   if(tf) tf.onclick=()=>{ game.finalistTeam = standingsView()[0].idx; game.mode='finale'; ensureFinaleSlots(); broadcast(); renderControl(); };
   document.getElementById('back-match').onclick=()=>{ game.mode='question'; broadcast(); renderControl(); };
