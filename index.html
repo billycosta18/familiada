@@ -245,7 +245,7 @@ textarea.io{width:100%; min-height:120px; font-family:ui-monospace,monospace; fo
       </button>
     </div>
     <p style="margin-top:18px; font-size:13px">Grasz na jednym urządzeniu? Wybierz <b>Panel prowadzącego</b> – ma podgląd planszy.</p>
-    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 23 · finał: imiona + zasłanianie</div>
+    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 24 · finał: punkty osobno</div>
   </div>
 </div>
 
@@ -870,7 +870,7 @@ function renderControlFinale(){
       <div class="row" style="align-items:center">
         <input id="fp-${i}" type="number" placeholder="pkt" value="${pts?pts:''}" style="width:72px; padding:10px; border-radius:8px; border:1px solid var(--slot-edge); background:var(--slot); color:var(--fg)">
         <button class="btn ${shown?'':'gold'}" data-save="${i}" style="flex:1">${shown?'🙈 Zasłoń odp.':'💾 Pokaż odp.'}</button>
-        <button class="btn ${rev?'':'gold'}" data-reveal="${i}" style="flex:1">${rev?'🙈 Zasłoń pkt':'👁 Odkryj pkt'}</button>
+        <button class="btn ${rev?'':'gold'}" data-reveal="${i}" style="flex:1">${rev?'↩ Cofnij pkt':'✅ Zalicz pkt'}</button>
       </div>
       <div class="muted" style="font-size:11px; margin-top:4px">${esc(names[0])}: ${sl.s1?(esc(sl.a1||'(puste)')+(sl.r1?(' '+(+sl.p1||0)):'')):'—'} &nbsp;|&nbsp; ${esc(names[1])}: ${sl.s2?(esc(sl.a2||'(puste)')+(sl.r2?(' '+(+sl.p2||0)):'')):'—'}</div>
     </div>`;
@@ -895,15 +895,15 @@ function renderControlFinale(){
   body.querySelectorAll('[data-save]').forEach(b=> b.onclick=()=>{
     const i=+b.dataset.save; const sl=game.finaleSlots[i];
     const fa=document.getElementById('fa-'+i), fp=document.getElementById('fp-'+i);
-    if(P===1){ sl.a1=fa.value; sl.p1=+fp.value||0; sl.s1=!sl.s1; if(!sl.s1) sl.r1=false; }
-    else { sl.a2=fa.value; sl.p2=+fp.value||0; sl.s2=!sl.s2; if(!sl.s2) sl.r2=false; }
+    if(P===1){ sl.a1=fa.value; sl.p1=+fp.value||0; sl.s1=!sl.s1; }
+    else { sl.a2=fa.value; sl.p2=+fp.value||0; sl.s2=!sl.s2; }
     broadcast(); renderControlFinale();
   });
   body.querySelectorAll('[data-reveal]').forEach(b=> b.onclick=()=>{
     const i=+b.dataset.reveal; const sl=game.finaleSlots[i];
     const fa=document.getElementById('fa-'+i), fp=document.getElementById('fp-'+i);
-    if(P===1){ sl.a1=fa.value; sl.p1=+fp.value||0; if(!sl.r1){ sl.s1=true; sl.r1=true; pushFx('good'); } else { sl.r1=false; } }
-    else { sl.a2=fa.value; sl.p2=+fp.value||0; if(!sl.r2){ sl.s2=true; sl.r2=true; pushFx('good'); } else { sl.r2=false; } }
+    if(P===1){ sl.a1=fa.value; sl.p1=+fp.value||0; if(!sl.r1){ sl.r1=true; pushFx('good'); } else { sl.r1=false; } }
+    else { sl.a2=fa.value; sl.p2=+fp.value||0; if(!sl.r2){ sl.r2=true; pushFx('good'); } else { sl.r2=false; } }
     broadcast(); renderControlFinale();
   });
   document.getElementById('fin-clear').onclick=()=>{ game.finaleSlots=null; ensureFinaleSlots(); broadcast(); renderControlFinale(); };
