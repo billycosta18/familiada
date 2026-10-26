@@ -245,7 +245,7 @@ textarea.io{width:100%; min-height:120px; font-family:ui-monospace,monospace; fo
       </button>
     </div>
     <p style="margin-top:18px; font-size:13px">Grasz na jednym urządzeniu? Wybierz <b>Panel prowadzącego</b> – ma podgląd planszy.</p>
-    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 21 · port 443 + offline lib</div>
+    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--gold);letter-spacing:2px">WERSJA 22 · drabinka pucharowa</div>
   </div>
 </div>
 
@@ -367,20 +367,37 @@ let game = freshGame();
 function freshGame(){
   return {
     mode:"idle",
+    stage:"m1",
+    round:0,
     qIndex:0,
     progress:{},
     matchScores:[0,0],
-    standings:[0,1,2,3].map(()=>({played:0,wins:0,points:0})),
-    schedule:[[0,1],[2,3],[0,2],[1,3],[0,3],[1,2]],
-    matchIndex:0,
-    finalistTeam:null,
+    bracket:{
+      m1:{teams:[0,1], winner:null, scores:[0,0]},
+      m2:{teams:[2,3], winner:null, scores:[0,0]},
+      semi:{teams:[null,null], winner:null, scores:[0,0]},
+    },
     preStart:false,
+    finalistTeam:null,
     finaleIndex:0,
     finaleProgress:{},
     finaleTotal:0,
     finaleSlots:[],
     fx:{id:0, kind:null},
   };
+}
+var STAGE_LABEL={m1:'Mecz 1', m2:'Mecz 2', semi:'Półfinał'};
+var STAGE_OFFSET={m1:0, m2:4, semi:8};
+function teamName(i){ return (i==null)?'—':config.teamNames[i]; }
+function curMatchTeams(){ if(game.stage==='semi'){ return [game.bracket.m1.winner, game.bracket.m2.winner]; } return game.bracket[game.stage].teams; }
+function beginTournament(){
+  game.bracket={m1:{teams:[0,1],winner:null,scores:[0,0]}, m2:{teams:[2,3],winner:null,scores:[0,0]}, semi:{teams:[null,null],winner:null,scores:[0,0]}};
+  startStage('m1');
+}
+function startStage(stage){
+  game.stage=stage; game.round=0; game.matchScores=[0,0]; game.qIndex=STAGE_OFFSET[stage]; game.progress={}; game.preStart=false;
+  if(stage==='semi'){ game.bracket.semi.teams=[game.bracket.m1.winner, game.bracket.m2.winner]; }
+  game.mode='question'; pushFx('round'); broadcast(); renderControl();
 }
 function curProgress(){
   if(!game.progress[game.qIndex]){
@@ -482,24 +499,22 @@ function buildStatePacket(){
     mode: game.mode,
     teamNames: config.teamNames,
     maxStrikes: config.maxStrikes,
-    standings: standingsView(),
+    bracket: bracketView(),
     fx: game.fx,
   };
-  const pair = game.schedule[game.matchIndex] || [0,1];
   if(game.mode==='question' && q){
-    packet.roundName = q.round;
-    packet.multiplier = q.multiplier||1;
+    const pair=curMatchTeams();
+    packet.stageLabel = STAGE_LABEL[game.stage]||'';
+    packet.round = game.round;
+    packet.roundsTotal = 4;
     packet.qText = q.text;
-    packet.qIndex = game.qIndex;
-    packet.qTotal = config.questions.length;
     packet.answers = q.answers.map((a,i)=>({text:a.text, points:a.points, revealed:p.revealed[i]}));
     packet.strikes = p.strikes;
     packet.pot = pot;
     packet.qShown = !!p.shown;
-    packet.matchTeams = [config.teamNames[pair[0]], config.teamNames[pair[1]]];
+    packet.matchTeams = [teamName(pair[0]), teamName(pair[1])];
     packet.matchScores = game.matchScores;
-    packet.matchIndex = game.matchIndex;
-    packet.matchTotal = game.schedule.length;
+    packet.multiplier = q.multiplier||1;
   }
   if(game.mode==='finale'){
     ensureFinaleSlots();
@@ -576,8 +591,8 @@ function renderDisplay(s){
     return;
   }
   if(s.mode==='rules'){ renderRulesDisplay(s); return; }
-  if(s.mode==='standings'){ renderStandingsDisplay(s,'TABELA'); return; }
-  if(s.mode==='gameover'){ renderStandingsDisplay(s,'WYNIKI KOŃCOWE'); return; }
+  if(s.mode==='bracket'){ renderBracketDisplay(s,'DRABINKA'); return; }
+  if(s.mode==='gameover'){ renderBracketDisplay(s,'KONIEC GRY'); return; }
   if(s.mode==='finale'){ renderFinaleDisplay(s); return; }
   const mt = s.matchTeams||["A","B"]; const ms = s.matchScores||[0,0];
   const marks = Array.from({length:s.maxStrikes||3},(_,i)=>`<span class="x ${i<s.strikes?'on':''}">✖</span>`).join('');
@@ -587,7 +602,7 @@ function renderDisplay(s){
       <div class="potbox"><span class="lbl">Pula</span><span class="val">${s.pot||0}</span></div>
       ${teamHtml(mt[1],ms[1],false)}
     </div>
-    <div class="roundtag">MECZ ${(s.matchIndex||0)+1}/${s.matchTotal||6} &nbsp;·&nbsp; ${esc(s.roundName||'')}${s.multiplier>1?' ×'+s.multiplier:''}</div>
+    <div class="roundtag">${esc(s.stageLabel||'')} &nbsp;·&nbsp; RUNDA ${(s.round||0)+1}/${s.roundsTotal||4}${s.multiplier>1?' · ×'+s.multiplier:''}</div>
     <div class="question">${s.qShown ? esc(s.qText||'') : '<span style="letter-spacing:10px;opacity:.5">● ● ●</span>'}</div>
     <div class="board">
       ${(s.answers||[]).map((a,i)=>answerHtml(a,i)).join('')}
@@ -722,7 +737,7 @@ function renderControl(){
   }
   if(game.mode==='intro'){ renderControlIntro(); return; }
   if(game.mode==='rules'){ renderControlRules(); return; }
-  if(game.mode==='standings'){ renderControlStandings(); return; }
+  if(game.mode==='bracket'){ renderControlBracket(); return; }
   if(game.mode==='gameover'){ renderControlGameover(); return; }
   if(game.mode==='finale'){ renderControlFinale(); return; }
   renderControlQuestion();
@@ -732,27 +747,31 @@ function roundsCount(){ return new Set(config.questions.map(q=>q.round)).size; }
 let matchEnding=false;
 function renderControlQuestion(){
   const body=document.getElementById('c-body');
-  const pair=game.schedule[game.matchIndex]||[0,1];
-  const nmA=config.teamNames[pair[0]], nmB=config.teamNames[pair[1]];
+  const pair=curMatchTeams();
+  const nmA=teamName(pair[0]), nmB=teamName(pair[1]);
+  const label=STAGE_LABEL[game.stage]||'';
   if(matchEnding){
     const a=game.matchScores[0], b=game.matchScores[1];
     body.innerHTML=`<div class="card">
-      <h3>Zakończyć mecz?</h3>
-      <div class="ctl-meta">Do tabeli dopiszę zdobyte punkty — ${esc(nmA)}: <b style="color:var(--gold)">${a}</b> &nbsp;·&nbsp; ${esc(nmB)}: <b style="color:var(--gold)">${b}</b></div>
-      <button class="btn gold" id="win-ok" style="width:100%; margin-top:10px">✅ Dopisz punkty → tabela</button>
+      <h3>${label} — kto wygrał?</h3>
+      <div class="ctl-meta">${esc(nmA)}: <b style="color:var(--gold)">${a}</b> &nbsp;·&nbsp; ${esc(nmB)}: <b style="color:var(--gold)">${b}</b></div>
+      <button class="btn ${a>=b?'gold':''}" id="win-a" style="width:100%; margin-top:10px">🏆 Wygrywa ${esc(nmA)}</button>
+      <button class="btn ${b>a?'gold':''}" id="win-b" style="width:100%; margin-top:8px">🏆 Wygrywa ${esc(nmB)}</button>
       <button class="btn ghost" id="win-cancel" style="width:100%; margin-top:8px">Anuluj</button>
     </div>`;
-    document.getElementById('win-ok').onclick=()=>endMatch();
+    document.getElementById('win-a').onclick=()=>endMatch(0);
+    document.getElementById('win-b').onclick=()=>endMatch(1);
     document.getElementById('win-cancel').onclick=()=>{ matchEnding=false; renderControlQuestion(); };
     return;
   }
   const q=config.questions[game.qIndex]; const p=curProgress();
   let pot=0; q.answers.forEach((a,i)=>{ if(p.revealed[i]) pot+=a.points; }); pot*=(q.multiplier||1);
+  const lastRound = game.round>=3;
   body.innerHTML = `
     <div class="card">
-      <div class="ctl-meta" style="margin-bottom:6px">MECZ ${game.matchIndex+1}/${game.schedule.length}: <b>${esc(nmA)}</b> vs <b>${esc(nmB)}</b></div>
+      <div class="ctl-meta" style="margin-bottom:6px">${label}: <b>${esc(nmA)}</b> vs <b>${esc(nmB)}</b> &nbsp;·&nbsp; Runda ${game.round+1}/4</div>
       <div class="ctl-q">${esc(q.text)}</div>
-      <div class="ctl-meta">${esc(q.round)}${q.multiplier>1?(' · ×'+q.multiplier):''} · pytanie meczu</div>
+      <div class="ctl-meta">${esc(q.round)}${q.multiplier>1?(' · ×'+q.multiplier):''}</div>
       <button class="btn ${p.shown?'':'gold'}" id="toggle-q" style="width:100%; margin:6px 0 10px">${p.shown?'🙈 Ukryj pytanie':'👁 Pokaż pytanie na rzutniku'}</button>
       <div class="ans-list">
         ${q.answers.map((a,i)=>`<button class="ans-item ${p.revealed[i]?'rev':''}" data-i="${i}">
@@ -774,24 +793,27 @@ function renderControlQuestion(){
       </div>
     </div>
     <div class="card">
-      <h3>Wynik meczu</h3>
+      <h3>Wynik meczu (po 4 rundach)</h3>
       ${[0,1].map(t=>`<div class="score-ctl">
         <span class="nm">${esc(t===0?nmA:nmB)}</span>
         <button class="btn stepbtn" data-step="${t}:-">–</button>
         <span class="sc" id="sc-${t}">${game.matchScores[t]}</span>
         <button class="btn stepbtn" data-step="${t}:+">+</button></div>`).join('')}
-      <button class="btn gold" id="end-match" style="width:100%; margin-top:10px">✅ Zakończ mecz → tabela</button>
+      ${lastRound
+        ? `<button class="btn gold" id="end-match" style="width:100%; margin-top:10px">✅ Zakończ mecz → wynik</button>`
+        : `<button class="btn gold" id="next-round" style="width:100%; margin-top:10px">▶ Następna runda (${game.round+2}/4)</button>`}
+      <div class="row" style="margin-top:8px">
+        ${game.round>0?`<button class="btn ghost" id="prev-round" style="flex:1">◀ Poprz. runda</button>`:''}
+        <button class="btn ghost" id="reset-q" style="flex:1">♻ Wyczyść rundę</button>
+      </div>
     </div>
     <div class="card">
       <h3>Opcje</h3>
       <div class="row">
-        <button class="btn ghost" id="reset-q" style="flex:1">♻ Wyczyść pytanie</button>
         <button class="btn gold" id="round-jingle" style="flex:1">🎶 Jingiel</button>
+        <button class="btn ghost" id="to-bracket" style="flex:1">📊 Drabinka</button>
       </div>
-      <div class="row" style="margin-top:8px">
-        <button class="btn ghost" id="to-finale" style="flex:1">🏁 Finał</button>
-        <button class="btn ghost" id="to-end" style="flex:1">🏆 Zakończ grę</button>
-      </div>
+      <button class="btn ghost" id="to-end" style="width:100%; margin-top:8px">🏆 Zakończ grę</button>
     </div>`;
   body.querySelectorAll('.ans-item').forEach(b=> b.onclick=()=>{ const i=+b.dataset.i; p.revealed[i]=!p.revealed[i]; if(p.revealed[i]) pushFx('ding'); else pushFx(null); broadcast(); renderControlQuestion(); });
   document.getElementById('toggle-q').onclick=()=>{ p.shown=!p.shown; broadcast(); renderControlQuestion(); };
@@ -799,19 +821,20 @@ function renderControlQuestion(){
   document.getElementById('clr-x').onclick=()=>{ p.strikes=0; pushFx(null); broadcast(); renderControlQuestion(); };
   body.querySelectorAll('[data-award]').forEach(b=> b.onclick=()=>{ const t=+b.dataset.award; game.matchScores[t]+=pot; pushFx('win'); broadcast(); renderControlQuestion(); });
   body.querySelectorAll('[data-step]').forEach(b=> b.onclick=()=>{ const [t,op]=b.dataset.step.split(':'); game.matchScores[+t]=Math.max(0,game.matchScores[+t]+(op==='+'?5:-5)); broadcast(); document.getElementById('sc-'+t).textContent=game.matchScores[+t]; });
-  document.getElementById('end-match').onclick=()=>{ matchEnding=true; renderControlQuestion(); };
+  const nr=document.getElementById('next-round'); if(nr) nr.onclick=()=>{ if(game.round<3){ game.round++; game.qIndex=STAGE_OFFSET[game.stage]+game.round; pushFx('round'); broadcast(); renderControlQuestion(); } };
+  const pr=document.getElementById('prev-round'); if(pr) pr.onclick=()=>{ if(game.round>0){ game.round--; game.qIndex=STAGE_OFFSET[game.stage]+game.round; pushFx(null); broadcast(); renderControlQuestion(); } };
+  const em=document.getElementById('end-match'); if(em) em.onclick=()=>{ matchEnding=true; renderControlQuestion(); };
   document.getElementById('reset-q').onclick=()=>{ game.progress[game.qIndex]={revealed:q.answers.map(()=>false),strikes:0,shown:false}; pushFx(null); broadcast(); renderControlQuestion(); };
   document.getElementById('round-jingle').onclick=()=>{ if(room&&roomReady) room.emit('cmd',{type:'roundjingle'}); };
-  document.getElementById('to-finale').onclick=()=>{ game.mode='finale'; ensureFinaleSlots(); broadcast(); renderControl(); };
+  document.getElementById('to-bracket').onclick=()=>{ game.mode='bracket'; broadcast(); renderControl(); };
   document.getElementById('to-end').onclick=()=>{ game.mode='gameover'; pushFx('win'); broadcast(); renderControl(); };
 }
-function endMatch(){
-  const pair=game.schedule[game.matchIndex]||[0,1];
-  const a=+game.matchScores[0]||0, b=+game.matchScores[1]||0;
-  game.standings[pair[0]].played++; game.standings[pair[1]].played++;
-  game.standings[pair[0]].points+=a; game.standings[pair[1]].points+=b;
-  if(a>b) game.standings[pair[0]].wins++; else if(b>a) game.standings[pair[1]].wins++;
-  matchEnding=false; game.mode='standings'; pushFx('win'); broadcast(); renderControl();
+function endMatch(side){
+  const pair=curMatchTeams(); const key=game.stage;
+  game.bracket[key].teams = pair.slice();
+  game.bracket[key].scores = game.matchScores.slice();
+  game.bracket[key].winner = pair[side];
+  matchEnding=false; game.mode='bracket'; pushFx('win'); broadcast(); renderControl();
 }
 let finalePlayer=1;
 function renderControlFinale(){
@@ -884,7 +907,7 @@ function renderControlIntro(){
     <button class="btn ghost" style="width:100%; margin-top:8px" id="go-q1">▶ Pomiń zasady → 1. pytanie</button>
     <button class="btn ghost" style="width:100%; margin-top:8px" id="go-idle">◀ Wróć</button>
   </div>`;
-  const startT=()=>{ game.matchIndex=0; game.qIndex=0; game.matchScores=[0,0]; game.progress={}; game.standings=[0,1,2,3].map(()=>({played:0,wins:0,points:0})); game.mode='question'; pushFx('round'); broadcast(); renderControl(); };
+  const startT=()=>{ beginTournament(); };
   document.getElementById('go-rules').onclick=()=>{ game.mode='rules'; broadcast(); renderControl(); };
   document.getElementById('go-q1').onclick=startT;
   document.getElementById('go-idle').onclick=()=>{ game.mode='idle'; broadcast(); renderControl(); };
@@ -894,153 +917,131 @@ function renderControlRules(){
   body.innerHTML=`<div class="card" style="text-align:center">
     <h3>Zasady na rzutniku</h3>
     <p class="muted" style="margin-bottom:6px">Na ekranie wyświetlają się zasady turnieju (faza grupowa + finał). Gdy publiczność przeczyta — rozpocznij.</p>
-    <button class="btn gold big" style="width:100%; margin-top:6px" id="rules-table">📊 Dalej → tabela drużyn</button>
+    <button class="btn gold big" style="width:100%; margin-top:6px" id="rules-table">📊 Dalej → drabinka</button>
     <button class="btn ghost" style="width:100%; margin-top:8px" id="rules-back">◀ Wróć</button>
   </div>`;
-  document.getElementById('rules-table').onclick=()=>{ game.standings=[0,1,2,3].map(()=>({played:0,wins:0,points:0})); game.matchIndex=0; game.matchScores=[0,0]; game.preStart=true; game.mode='standings'; broadcast(); renderControl(); };
+  document.getElementById('rules-table').onclick=()=>{ game.bracket={m1:{teams:[0,1],winner:null,scores:[0,0]},m2:{teams:[2,3],winner:null,scores:[0,0]},semi:{teams:[null,null],winner:null,scores:[0,0]}}; game.matchScores=[0,0]; game.preStart=true; game.mode='bracket'; broadcast(); renderControl(); };
   document.getElementById('rules-back').onclick=()=>{ game.mode='intro'; broadcast(); renderControl(); };
 }
 function renderControlGameover(){
   const body=document.getElementById('c-body');
-  const st=standingsView();
+  const champ = (game.bracket.semi.winner!=null)? config.teamNames[game.bracket.semi.winner] : null;
+  const b=game.bracket;
   body.innerHTML=`<div class="card" style="text-align:center">
     <h3>Koniec gry</h3>
-    <div class="ctl-q" style="font-size:22px; color:var(--gold)">🏆 ${st[0]?esc(st[0].name):''}</div>
-    <div class="ans-list" style="margin-top:10px">
-      ${st.map((t,i)=>`<div class="ans-item" style="${i===0?'border-color:var(--gold)':''}"><span class="n">${i+1}</span><span class="t">${esc(t.name)}</span><span class="p">${t.points}</span></div>`).join('')}
+    <div class="ctl-q" style="font-size:24px; color:var(--gold)">🏆 ${champ?esc(champ):'—'}</div>
+    <div class="ctl-meta" style="margin-top:8px; text-align:left">
+      Mecz 1: ${esc(teamName(b.m1.teams[0]))} ${b.m1.scores[0]} : ${b.m1.scores[1]} ${esc(teamName(b.m1.teams[1]))}<br>
+      Mecz 2: ${esc(teamName(b.m2.teams[0]))} ${b.m2.scores[0]} : ${b.m2.scores[1]} ${esc(teamName(b.m2.teams[1]))}<br>
+      Półfinał: ${esc(teamName(b.m1.winner))} ${b.semi.scores[0]} : ${b.semi.scores[1]} ${esc(teamName(b.m2.winner))}
     </div>
     <div class="row" style="margin-top:12px">
-      <button class="btn" id="back-game" style="flex:1">↩ Wróć</button>
+      <button class="btn" id="back-game" style="flex:1">↩ Drabinka</button>
       <button class="btn gold" id="new-game" style="flex:1">🔄 Nowa gra</button>
     </div></div>`;
-  document.getElementById('back-game').onclick=()=>{ game.mode='standings'; broadcast(); renderControl(); };
+  document.getElementById('back-game').onclick=()=>{ game.mode='bracket'; broadcast(); renderControl(); };
   document.getElementById('new-game').onclick=()=>{ game=freshGame(); game.mode='idle'; broadcast(); renderControl(); };
 }
-let _confirmArmed=false;
-function confirmReset(){ return true; }
-
-/* ============================================================
-   EDYTOR
-   ============================================================ */
-function standingsView(){
-  return game.standings.map((s,i)=>({name:config.teamNames[i], idx:i, played:s.played, wins:s.wins, points:s.points}))
-    .sort((a,b)=> b.points-a.points || b.wins-a.wins || a.name.localeCompare(b.name));
+function bracketView(){
+  const b=game.bracket; const nm=i=>(i==null?null:config.teamNames[i]);
+  function side(m){ if(m.winner==null) return null; return m.winner===m.teams[0]?0:1; }
+  return {
+    m1:{a:nm(b.m1.teams[0]), b:nm(b.m1.teams[1]), scores:b.m1.scores, win:side(b.m1)},
+    m2:{a:nm(b.m2.teams[0]), b:nm(b.m2.teams[1]), scores:b.m2.scores, win:side(b.m2)},
+    semi:{a:nm(b.m1.winner), b:nm(b.m2.winner), scores:b.semi.scores, win:side(b.semi)},
+    champion: nm(b.semi.winner),
+    stage: game.stage,
+  };
 }
-let prevStandings=null;
-function countUp(el, from, to, dur){ const t0=performance.now(); (function step(now){ const k=Math.min(1,(now-t0)/dur); el.textContent=Math.round(from+(to-from)*k); if(k<1) requestAnimationFrame(step); })(performance.now()); }
-function stRows(arr){
-  return arr.map((t,i)=>{
-    const lead=i===0; const bg=lead?'rgba(255,210,74,.16)':'var(--slot)'; const col=lead?'var(--gold)':'var(--fg)';
-    return `<div class="st-row" data-team="${t.idx}" style="display:flex; align-items:stretch; gap:0; background:${bg}; border:1px solid var(--slot-edge); border-radius:12px; overflow:hidden; will-change:transform">
-      <div style="width:clamp(46px,6vw,64px); display:flex; align-items:center; justify-content:center; background:${lead?'var(--gold)':'#0a2766'}; color:${lead?'#061640':'var(--fg)'}; font-family:var(--disp); font-size:clamp(18px,3.2vw,30px); padding:clamp(8px,1.5vh,14px) 0">${i+1}</div>
-      <div style="flex:1; min-width:0; display:flex; align-items:center; font-family:var(--disp); text-transform:uppercase; letter-spacing:1px; font-size:clamp(15px,2.9vw,28px); color:${col}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 12px">${esc(t.name)}</div>
-      <div style="width:clamp(42px,5vw,58px); display:flex; align-items:center; justify-content:center; font-family:var(--disp); color:var(--muted); font-size:clamp(13px,2.4vw,22px)">${t.played}</div>
-      <div style="width:clamp(42px,5vw,58px); display:flex; align-items:center; justify-content:center; font-family:var(--disp); color:var(--muted); font-size:clamp(13px,2.4vw,22px)">${t.wins}</div>
-      <div class="st-pkt" style="width:clamp(60px,8vw,96px); display:flex; align-items:center; justify-content:center; font-family:var(--disp); color:var(--gold); font-size:clamp(20px,3.6vw,36px)">${t.points}</div>
-    </div>`;
-  }).join('');
-}
-function renderStandingsDisplay(s,title){
+function renderBracketDisplay(s,title){
   const body=document.getElementById('d-body');
-  const cur=s.standings||[];
-  const curMap={}; const names={};
-  cur.forEach(t=>{ curMap[t.idx]={played:t.played,wins:t.wins,points:t.points}; names[t.idx]=t.name; });
-  function viewFrom(map){ return cur.map(t=>{ const v=map[t.idx]||{played:0,wins:0,points:0}; return {idx:t.idx,name:names[t.idx],played:v.played,wins:v.wins,points:v.points}; }).sort((a,b)=> b.points-a.points||b.wins-a.wins||a.name.localeCompare(b.name)); }
-  const doAnim = (title==='TABELA') && prevStandings && JSON.stringify(prevStandings)!==JSON.stringify(curMap);
-  const firstView = doAnim ? viewFrom(prevStandings) : viewFrom(curMap);
+  const v=s.bracket||{}; const m1=v.m1||{}, m2=v.m2||{}, se=v.semi||{}; const champ=v.champion;
+  function tb(name, win){ return `<div class="bx ${win?'bx-win':''}">${esc(name||'—')}</div>`; }
+  function block(label, A, B, win){ return `<div class="bk-m"><div class="bk-l">${label}</div>${tb(A,win===0)}${tb(B,win===1)}</div>`; }
   body.innerHTML = `
+    <style>
+      .bk-wrap{flex:1; display:flex; align-items:center; justify-content:center; gap:clamp(8px,2vw,26px); padding:10px clamp(10px,3vw,30px) 22px; flex-wrap:wrap}
+      .bk-col{display:flex; flex-direction:column; justify-content:center; gap:clamp(14px,4vh,40px)}
+      .bk-m{background:linear-gradient(180deg,var(--slot),#071f52); border:1px solid var(--slot-edge); border-radius:12px; padding:clamp(8px,1.4vw,14px); min-width:clamp(150px,19vw,230px)}
+      .bk-l{font-family:var(--disp); color:var(--muted); letter-spacing:2px; text-transform:uppercase; font-size:clamp(11px,1.8vw,16px); margin-bottom:6px; text-align:center}
+      .bx{font-family:var(--disp); text-transform:uppercase; letter-spacing:1px; font-size:clamp(14px,2.3vw,24px); color:var(--fg); padding:8px 12px; border-radius:8px; background:#0a2766; border:1px solid var(--slot-edge); margin:4px 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-align:center}
+      .bx-win{background:var(--gold); color:#061640; border-color:var(--gold-deep)}
+      .bk-arrow{align-self:center; color:var(--gold); font-size:clamp(20px,3vw,34px)}
+      .bk-fin{display:flex; flex-direction:column; align-items:center; gap:8px}
+      .bk-champ{font-family:var(--disp); color:#061640; background:var(--gold); border-radius:12px; padding:12px 18px; font-size:clamp(16px,2.8vw,30px); text-transform:uppercase; text-align:center}
+    </style>
     <div class="roundtag" style="padding-top:16px; font-size:clamp(18px,3.4vw,30px); color:var(--gold)">${title}</div>
-    <div style="flex:1; display:flex; align-items:center; justify-content:center; padding:8px clamp(10px,3vw,30px) 22px">
-      <div style="width:100%; max-width:760px">
-        <div style="display:flex; align-items:stretch; padding:0 0 6px; color:var(--muted); font-family:var(--disp); font-size:clamp(11px,2vw,16px)">
-          <span style="width:clamp(46px,6vw,64px)"></span>
-          <span style="flex:1; padding:0 12px">DRUŻYNA</span>
-          <span style="width:clamp(42px,5vw,58px); text-align:center">M</span>
-          <span style="width:clamp(42px,5vw,58px); text-align:center">W</span>
-          <span style="width:clamp(60px,8vw,96px); text-align:center">PKT</span>
-        </div>
-        <div id="st-list" style="display:flex; flex-direction:column; gap:clamp(8px,1.4vh,14px)">${stRows(firstView)}</div>
+    <div class="bk-wrap">
+      <div class="bk-col">
+        ${block('Mecz 1', m1.a, m1.b, m1.win)}
+        ${block('Mecz 2', m2.a, m2.b, m2.win)}
+      </div>
+      <div class="bk-arrow">→</div>
+      <div class="bk-col">${block('Półfinał', se.a, se.b, se.win)}</div>
+      <div class="bk-arrow">→</div>
+      <div class="bk-col bk-fin">
+        <div class="bk-l">Finał</div>
+        <div style="font-size:clamp(34px,6vw,62px)">🏆</div>
+        <div class="bk-champ">${esc(champ||'?')}</div>
       </div>
     </div>`;
-  if(doAnim){
-    const list=document.getElementById('st-list');
-    setTimeout(()=>{
-      const oldTop={}, oldPts={};
-      list.querySelectorAll('.st-row').forEach(r=>{ oldTop[r.dataset.team]=r.getBoundingClientRect().top; oldPts[r.dataset.team]=+r.querySelector('.st-pkt').textContent||0; });
-      list.innerHTML = stRows(viewFrom(curMap));
-      const rows=[...list.querySelectorAll('.st-row')];
-      rows.forEach(r=>{ const id=r.dataset.team; if(oldTop[id]!=null){ const dy=oldTop[id]-r.getBoundingClientRect().top; if(dy){ r.style.transform='translateY('+dy+'px)'; r.style.transition='none'; } } });
-      requestAnimationFrame(()=>{ rows.forEach(r=>{ r.style.transition='transform .7s cubic-bezier(.22,.9,.25,1)'; r.style.transform=''; }); });
-      rows.forEach(r=>{ const id=r.dataset.team; const el=r.querySelector('.st-pkt'); const from=oldPts[id]||0; const to=+el.textContent||0; if(from!==to) countUp(el,from,to,700); });
-      if(typeof playFx==='function') playFx('ding');
-    }, 900);
-  }
-  prevStandings = curMap;
 }
-function renderControlStandings(){
+function renderControlBracket(){
   const body=document.getElementById('c-body');
-  const st=standingsView();
-  if(game.preStart){
-    const p0=game.schedule[0]||[0,1];
-    body.innerHTML=`<div class="card"><h3>Tabela drużyn</h3>
-      <div class="ans-list">
-        ${st.map((t,i)=>`<div class="ans-item" style="${i===0?'border-color:var(--gold)':''}"><span class="n">${i+1}</span><span class="t">${esc(t.name)}</span><span class="p">${t.points}</span></div>`).join('')}
-      </div></div>
-    <div class="card">
-      <div class="ctl-meta">Wszystkie drużyny gotowe — zaczynamy fazę grupową.</div>
-      <button class="btn gold big" id="start-tourn" style="width:100%; margin-top:6px">▶ Rozpocznij: ${esc(config.teamNames[p0[0]])} vs ${esc(config.teamNames[p0[1]])}</button>
-      <button class="btn ghost" id="pre-back" style="width:100%; margin-top:8px">◀ Wróć do zasad</button>
+  const b=game.bracket;
+  function line(label, aIdx, bIdx, scores, winIdx){
+    const a=teamName(aIdx), bb=teamName(bIdx);
+    return `<div class="ans-item" style="display:block; padding:10px 12px">
+      <div style="font-size:11px; color:var(--muted); letter-spacing:1px; text-transform:uppercase">${label}</div>
+      <div style="display:flex; justify-content:space-between; margin-top:3px; ${winIdx!=null&&winIdx===aIdx?'color:var(--gold)':''}"><span>${esc(a)}</span><span>${scores?scores[0]:''}</span></div>
+      <div style="display:flex; justify-content:space-between; ${winIdx!=null&&winIdx===bIdx?'color:var(--gold)':''}"><span>${esc(bb)}</span><span>${scores?scores[1]:''}</span></div>
     </div>`;
-    document.getElementById('start-tourn').onclick=()=>{ game.preStart=false; game.matchIndex=0; game.qIndex=0; game.matchScores=[0,0]; game.progress={}; game.mode='question'; pushFx('round'); broadcast(); renderControl(); };
-    document.getElementById('pre-back').onclick=()=>{ game.preStart=false; game.mode='rules'; broadcast(); renderControl(); };
-    return;
   }
-  const done = game.matchIndex >= game.schedule.length-1;
-  const nextPair = game.schedule[game.matchIndex+1];
-  let html=`<div class="card"><h3>Tabela</h3>
+  let next='';
+  if(game.preStart){
+    next=`<button class="btn gold big" id="go-m1" style="width:100%">▶ Rozpocznij: Mecz 1 — ${esc(config.teamNames[0])} vs ${esc(config.teamNames[1])}</button>`;
+  } else if(!b.m2.winner){
+    next=`<button class="btn gold big" id="go-m2" style="width:100%">▶ Mecz 2 — ${esc(config.teamNames[2])} vs ${esc(config.teamNames[3])}</button>`;
+  } else if(!b.semi.winner){
+    next=`<button class="btn gold big" id="go-semi" style="width:100%">▶ Półfinał — ${esc(teamName(b.m1.winner))} vs ${esc(teamName(b.m2.winner))}</button>`;
+  } else {
+    next=`<button class="btn gold big" id="go-fin" style="width:100%">🏁 Finał — ${esc(teamName(b.semi.winner))}</button>`;
+  }
+  body.innerHTML=`<div class="card"><h3>Drabinka</h3>
     <div class="ans-list">
-      ${st.map((t,i)=>`<div class="ans-item" style="${i===0?'border-color:var(--gold)':''}">
-        <span class="n">${i+1}</span><span class="t">${esc(t.name)}</span>
-        <span class="muted" style="font-size:12px">M${t.played} · W${t.wins}</span>
-        <span class="p">${t.points}</span></div>`).join('')}
+      ${line('Mecz 1', b.m1.teams[0], b.m1.teams[1], b.m1.winner!=null?b.m1.scores:null, b.m1.winner)}
+      ${line('Mecz 2', b.m2.teams[0], b.m2.teams[1], b.m2.winner!=null?b.m2.scores:null, b.m2.winner)}
+      ${line('Półfinał', b.m1.winner, b.m2.winner, b.semi.winner!=null?b.semi.scores:null, b.semi.winner)}
     </div></div>
   <div class="card">
-    <div class="ctl-meta">Mecz ${game.matchIndex+1}/${game.schedule.length} rozegrany.</div>`;
-  if(!done && nextPair){
-    html += `<button class="btn gold big" id="next-match" style="width:100%; margin-top:6px">▶ Następny mecz: ${esc(config.teamNames[nextPair[0]])} vs ${esc(config.teamNames[nextPair[1]])}</button>`;
-  } else {
-    html += `<button class="btn gold big" id="to-finale2" style="width:100%; margin-top:6px">🏁 Do finału: ${esc(st[0]?st[0].name:'')}</button>`;
-  }
-  html += `<div class="row" style="margin-top:8px">
-      <button class="btn ghost" id="back-match" style="flex:1">↩ Wróć do meczu</button>
-      <button class="btn ghost" id="to-end2" style="flex:1">🏆 Zakończ grę</button>
+    ${next}
+    <div class="row" style="margin-top:8px">
+      ${game.preStart?`<button class="btn ghost" id="br-rules" style="flex:1">◀ Zasady</button>`:`<button class="btn ghost" id="br-resume" style="flex:1">↩ Wróć do meczu</button>`}
+      <button class="btn ghost" id="br-end" style="flex:1">🏆 Zakończ grę</button>
     </div></div>`;
-  body.innerHTML=html;
-  const nm=document.getElementById('next-match');
-  if(nm) nm.onclick=()=>{ game.matchIndex++; game.qIndex=Math.min(game.matchIndex, config.questions.length-1); game.matchScores=[0,0]; game.progress={}; game.mode='question'; pushFx('round'); broadcast(); renderControl(); };
-  const tf=document.getElementById('to-finale2');
-  if(tf) tf.onclick=()=>{ game.finalistTeam = standingsView()[0].idx; game.mode='finale'; ensureFinaleSlots(); broadcast(); renderControl(); };
-  document.getElementById('back-match').onclick=()=>{ game.mode='question'; broadcast(); renderControl(); };
-  document.getElementById('to-end2').onclick=()=>{ game.mode='gameover'; pushFx('win'); broadcast(); renderControl(); };
+  const g1=document.getElementById('go-m1'); if(g1) g1.onclick=()=>beginTournament();
+  const g2=document.getElementById('go-m2'); if(g2) g2.onclick=()=>startStage('m2');
+  const gs=document.getElementById('go-semi'); if(gs) gs.onclick=()=>startStage('semi');
+  const gf=document.getElementById('go-fin'); if(gf) gf.onclick=()=>{ game.finalistTeam=b.semi.winner; game.mode='finale'; ensureFinaleSlots(); broadcast(); renderControl(); };
+  const brr=document.getElementById('br-rules'); if(brr) brr.onclick=()=>{ game.mode='rules'; broadcast(); renderControl(); };
+  const brs=document.getElementById('br-resume'); if(brs) brs.onclick=()=>{ game.mode='question'; broadcast(); renderControl(); };
+  document.getElementById('br-end').onclick=()=>{ game.mode='gameover'; pushFx('win'); broadcast(); renderControl(); };
 }
 function renderRulesDisplay(s){
   const body=document.getElementById('d-body'); prevStandings=null;
   const ICO={
     teams:`<svg viewBox="0 0 100 100"><rect x="10" y="10" width="36" height="36" rx="8" fill="#ffd24a"/><rect x="54" y="10" width="36" height="36" rx="8" fill="#28c76f"/><rect x="10" y="54" width="36" height="36" rx="8" fill="#ff5a4d"/><rect x="54" y="54" width="36" height="36" rx="8" fill="#4aa3ff"/><circle cx="28" cy="28" r="7" fill="#06102e"/><circle cx="72" cy="28" r="7" fill="#06102e"/><circle cx="28" cy="72" r="7" fill="#06102e"/><circle cx="72" cy="72" r="7" fill="#06102e"/></svg>`,
-    robin:`<svg viewBox="0 0 100 100" fill="none" stroke="#ffd24a" stroke-width="4" stroke-linecap="round"><line x1="22" y1="22" x2="78" y2="22"/><line x1="22" y1="78" x2="78" y2="78"/><line x1="22" y1="22" x2="22" y2="78"/><line x1="78" y1="22" x2="78" y2="78"/><line x1="22" y1="22" x2="78" y2="78"/><line x1="78" y1="22" x2="22" y2="78"/><circle cx="22" cy="22" r="9" fill="#ffd24a" stroke="none"/><circle cx="78" cy="22" r="9" fill="#28c76f" stroke="none"/><circle cx="22" cy="78" r="9" fill="#ff5a4d" stroke="none"/><circle cx="78" cy="78" r="9" fill="#4aa3ff" stroke="none"/></svg>`,
-    points:`<svg viewBox="0 0 100 100"><rect x="8" y="30" width="84" height="40" rx="10" fill="#0a2766" stroke="#2a5bc0" stroke-width="3"/><circle cx="30" cy="50" r="13" fill="#28c76f"/><path d="M23 50 l5 6 l10 -13" stroke="#06260f" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><text x="62" y="60" font-family="Oswald, sans-serif" font-size="24" fill="#ffd24a" text-anchor="middle" font-weight="700">+PKT</text></svg>`,
-    table:`<svg viewBox="0 0 100 100"><text x="6" y="36" font-family="Oswald, sans-serif" font-size="16" fill="#9fb3e0">1</text><rect x="18" y="22" width="72" height="16" rx="6" fill="#ffd24a"/><text x="6" y="58" font-family="Oswald, sans-serif" font-size="16" fill="#9fb3e0">2</text><rect x="18" y="44" width="56" height="16" rx="6" fill="#123a86" stroke="#2a5bc0" stroke-width="2"/><text x="6" y="80" font-family="Oswald, sans-serif" font-size="16" fill="#9fb3e0">3</text><rect x="18" y="66" width="42" height="16" rx="6" fill="#123a86" stroke="#2a5bc0" stroke-width="2"/></svg>`,
-    trophy:`<svg viewBox="0 0 100 100" fill="none" stroke="#ffd24a" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><path d="M34 18 h32 v16 a16 16 0 0 1 -32 0 z" fill="#ffd24a"/><path d="M34 22 h-11 a10 10 0 0 0 11 15"/><path d="M66 22 h11 a10 10 0 0 1 -11 15"/><line x1="50" y1="50" x2="50" y2="62"/><path d="M37 80 h26 l-4 -14 h-18 z" fill="#ffd24a"/></svg>`,
+    vs:`<svg viewBox="0 0 100 100"><rect x="8" y="30" width="32" height="40" rx="8" fill="#ffd24a"/><rect x="60" y="30" width="32" height="40" rx="8" fill="#4aa3ff"/><text x="50" y="58" font-family="Oswald, sans-serif" font-size="22" fill="#eef4ff" text-anchor="middle" font-weight="700">VS</text></svg>`,
+    bracket:`<svg viewBox="0 0 100 100" fill="none" stroke="#ffd24a" stroke-width="4" stroke-linecap="round"><line x1="12" y1="22" x2="38" y2="22"/><line x1="12" y1="42" x2="38" y2="42"/><line x1="38" y1="22" x2="38" y2="42"/><line x1="38" y1="32" x2="58" y2="32"/><line x1="58" y1="32" x2="58" y2="68"/><line x1="12" y1="58" x2="38" y2="58"/><line x1="12" y1="78" x2="38" y2="78"/><line x1="38" y1="58" x2="38" y2="78"/><line x1="38" y1="68" x2="58" y2="68"/><line x1="58" y1="50" x2="82" y2="50"/><circle cx="86" cy="50" r="7" fill="#ffd24a" stroke="none"/></svg>`,
     duo:`<svg viewBox="0 0 100 100" fill="#ffd24a"><circle cx="30" cy="36" r="13"/><path d="M9 78 a21 21 0 0 1 42 0 z"/><circle cx="70" cy="36" r="13"/><path d="M49 78 a21 21 0 0 1 42 0 z"/></svg>`
   };
   const tile=(ico,cap,sub)=>`<div class="rl-tile"><div class="rl-ico">${ico}</div><div class="rl-cap">${cap}</div><div class="rl-sub">${sub||''}</div></div>`;
   body.innerHTML = `
     <style>
       .rl-wrap{flex:1; display:flex; flex-direction:column; justify-content:center; gap:clamp(10px,2.4vh,20px); padding:8px clamp(10px,3vw,34px) 22px; max-width:1080px; width:100%; margin:0 auto}
-      .rl-sec{display:flex; flex-direction:column; gap:8px}
       .rl-sechead{font-family:var(--disp); color:var(--gold); text-transform:uppercase; letter-spacing:3px; font-size:clamp(14px,2.6vw,24px); text-align:center}
-      .rl-row{display:flex; flex-wrap:wrap; justify-content:center; gap:clamp(8px,1.6vw,16px)}
-      .rl-tile{background:linear-gradient(180deg,var(--slot),#071f52); border:1px solid var(--slot-edge); border-radius:16px; padding:clamp(10px,1.8vw,18px); width:clamp(120px,21vw,180px); display:flex; flex-direction:column; align-items:center; gap:6px}
+      .rl-row{display:flex; flex-wrap:wrap; justify-content:center; align-items:stretch; gap:clamp(8px,1.6vw,16px)}
+      .rl-tile{background:linear-gradient(180deg,var(--slot),#071f52); border:1px solid var(--slot-edge); border-radius:16px; padding:clamp(10px,1.8vw,18px); width:clamp(130px,21vw,190px); display:flex; flex-direction:column; align-items:center; gap:6px}
       .rl-ico svg{width:clamp(60px,8vw,96px); height:auto; display:block}
       .rl-cap{font-family:var(--disp); text-transform:uppercase; letter-spacing:1px; font-size:clamp(13px,2.2vw,22px); color:var(--fg); text-align:center; line-height:1.05}
       .rl-sub{font-family:var(--body); font-size:clamp(11px,1.7vw,15px); color:var(--muted); text-align:center}
@@ -1048,26 +1049,16 @@ function renderRulesDisplay(s){
     </style>
     <div class="roundtag" style="padding-top:16px; font-size:clamp(18px,3.4vw,30px); color:var(--gold)">ZASADY GRY</div>
     <div class="rl-wrap">
-      <div class="rl-sec">
-        <div class="rl-sechead">Faza grupowa</div>
-        <div class="rl-row">
-          ${tile(ICO.teams,'4 drużyny','')}
-          <div class="rl-arrow">→</div>
-          ${tile(ICO.robin,'każdy z każdym','6 meczów')}
-          <div class="rl-arrow">→</div>
-          ${tile(ICO.points,'punkty','za odpowiedzi')}
-          <div class="rl-arrow">→</div>
-          ${tile(ICO.table,'tabela','po każdym meczu')}
-        </div>
+      <div class="rl-row">
+        ${tile(ICO.teams,'4 drużyny','')}
+        <div class="rl-arrow">→</div>
+        ${tile(ICO.vs,'mecz 1 vs 1','po 4 rundy')}
+        <div class="rl-arrow">→</div>
+        ${tile(ICO.bracket,'zwycięzcy dalej','drabinka: półfinał')}
+        <div class="rl-arrow">→</div>
+        ${tile(ICO.duo,'finał','2 osoby, łączny wynik')}
       </div>
-      <div class="rl-sec">
-        <div class="rl-sechead">Finał</div>
-        <div class="rl-row">
-          ${tile(ICO.trophy,'najlepsza drużyna','awansuje do finału')}
-          <div class="rl-arrow">→</div>
-          ${tile(ICO.duo,'2 osoby','łączny wynik')}
-        </div>
-      </div>
+      <div class="rl-sechead">Wygrywa drużyna, która przejdzie całą drabinkę</div>
     </div>`;
 }
 function openEditor(){
